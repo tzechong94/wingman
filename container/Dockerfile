@@ -118,7 +118,13 @@ RUN chmod +x /app/entrypoint.sh
 # ---- Workspace + permissions -------------------------------------------------
 RUN mkdir -p /workspace/group /workspace/extra && \
     chown -R node:node /workspace && \
-    chmod 777 /home/node
+    chmod 777 /home/node && \
+    # NanoClaw runs the container as the host uid (so mounted session DBs stay
+    # writable). An arbitrary host uid has no /etc/passwd entry, and some agent
+    # CLIs (qwen-code) call os.userInfo() at startup, which getpwuid()-fails
+    # with ENOENT and crashes. Make passwd/group writable so the spawn command
+    # can self-register the running uid. Sandboxed agent container — fine here.
+    chmod 666 /etc/passwd /etc/group
 
 USER node
 WORKDIR /workspace/group

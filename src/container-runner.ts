@@ -34,6 +34,7 @@ import { validateAdditionalMounts } from './modules/mount-security/index.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
 import './providers/index.js';
+import { nativeCredentialsEnabled } from './native-credential-proxy.js';
 import {
   getProviderContainerConfig,
   providerProvidesAgentSurfaces,
@@ -480,14 +481,24 @@ async function buildContainerArgs(
   // the gateway, we don't spawn. The caller (router or host-sweep) catches
   // the throw, leaves the inbound message pending, and the next sweep tick
   // retries.
-  if (agentIdentifier) {
-    await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+  // Native-credentials opt-out (use-native-credential-proxy): when
+  // NANOCLAW_NATIVE_CREDENTIALS=true, the credential is threaded into the
+  // container env directly (Anthropic via nativeCredentialEnvArgs; Qwen via
+  // the qwen provider's host contribution) and the OneCLI gateway is skipped
+  // entirely — no vault, no HTTPS proxy, no certs. Without the flag the
+  // gateway is mandatory exactly as before.
+  if (nativeCredentialsEnabled()) {
+    log.info('OneCLI gateway skipped — native .env credentials in use', { containerName });
+  } else {
+    if (agentIdentifier) {
+      await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+    }
+    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+    if (!onecliApplied) {
+      throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
+    }
+    log.info('OneCLI gateway applied', { containerName });
   }
-  const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-  if (!onecliApplied) {
-    throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
-  }
-  log.info('OneCLI gateway applied', { containerName });
 
   // Override entrypoint: run v2 entry point directly via Bun (no tsc, no stdin).
   args.push('--entrypoint', 'bash');
@@ -496,7 +507,19 @@ async function buildContainerArgs(
   const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
   args.push(imageTag);
 
-  args.push('-c', 'exec bun run /app/src/index.ts');
+  // Register a passwd entry for the running uid before exec. NanoClaw maps the
+  // host uid into the container (so mounted session DBs stay writable), but an
+  // arbitrary uid has no /etc/passwd entry — and some agent CLIs (qwen-code)
+  // call os.userInfo() at startup, which getpwuid()-fails with ENOENT and
+  // crashes before any model call. Idempotent (only when missing); a no-op for
+  // the image's default node uid (1000), which already has an entry. /etc/passwd
+  // is made writable in the image. `exec` is kept last so signals forward.
+  args.push(
+    '-c',
+    'if ! getent passwd "$(id -u)" >/dev/null 2>&1; then ' +
+      'echo "agent:x:$(id -u):$(id -g):agent:/home/node:/bin/sh" >> /etc/passwd 2>/dev/null || true; fi; ' +
+      'exec bun run /app/src/index.ts',
+  );
 
   return args;
 }
