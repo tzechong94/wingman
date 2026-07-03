@@ -27,6 +27,7 @@ import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from './egress
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
+import { getMessagingGroup } from './db/messaging-groups.js';
 import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
@@ -146,6 +147,15 @@ async function spawnContainer(session: Session): Promise<void> {
   // OneCLI agent identifier is always the agent group id — stable across
   // sessions and reversible via getAgentGroup() for approval routing.
   const agentIdentifier = agentGroup.id;
+  // Wingman: web-visitor sessions run with memory writes disabled — Engram
+  // tenancy is per-agent-group, so without this, one judge's chatter would
+  // be recallable in another judge's conversation. The provider's
+  // captureTurn checks this env var.
+  const originMg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+  if (originMg?.channel_type === 'web') {
+    contribution.env = { ...contribution.env, MEMORY_READONLY: 'true' };
+  }
+
   const args = await buildContainerArgs(
     mounts,
     containerName,

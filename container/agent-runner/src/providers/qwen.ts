@@ -413,6 +413,10 @@ export class QwenProvider implements AgentProvider {
 
   /** Write the user's message into memory. Fire-and-forget; never blocks a turn. */
   private captureTurn(userText: string, channel?: string): void {
+    // Web-demo sessions are memory-READONLY: Engram tenancy is per-agent-group,
+    // so persisting one judge's chatter would surface it in another judge's
+    // conversation. The host injects this env for web-channel sessions.
+    if (process.env.MEMORY_READONLY === 'true') return;
     const cfg = this.memoryCfg;
     if (!cfg || !userText.trim()) return;
     void callMemoryStdioTool(cfg, 'write', {

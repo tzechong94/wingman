@@ -152,6 +152,15 @@ async function sweep(): Promise<void> {
     log.error('Host sweep error', { err });
   }
 
+  // MODULE-HOOK:wingman-sweep:start
+  try {
+    const { sweepWingman } = await import('./modules/quotes/sweep.js');
+    await sweepWingman();
+  } catch (err) {
+    log.error('Wingman sweep error', { err });
+  }
+  // MODULE-HOOK:wingman-sweep:end
+
   setTimeout(sweep, SWEEP_INTERVAL_MS);
 }
 
