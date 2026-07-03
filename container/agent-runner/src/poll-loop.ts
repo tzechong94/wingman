@@ -14,6 +14,7 @@ import {
   type RoutingContext,
 } from './formatter.js';
 import { runQuoteDrivers } from './quotes/driver.js';
+import { enrichPromptWithVision } from './quotes/vision.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 
@@ -222,7 +223,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
-    const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
+    let prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
+
+    // Wingman: photos in the batch get a trusted Qwen-VL description appended
+    // pre-turn (deterministic — the model never invokes a vision tool).
+    prompt = await enrichPromptWithVision(prompt, keep);
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
