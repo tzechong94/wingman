@@ -13,6 +13,7 @@ import {
   stripInternalTags,
   type RoutingContext,
 } from './formatter.js';
+import { runQuoteDrivers } from './quotes/driver.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 
@@ -482,8 +483,16 @@ export async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
-          const { sent, hasUnwrapped } = dispatchResultText(event.text, routing);
-          if (sent === 0 && event.isError === true) {
+          // Wingman quote driver: extract + act on QUOTE_JSON / NUDGE_JSON
+          // deterministically (the model drafts; trusted code sends). The
+          // prose continues through the normal dispatch below.
+          const driven = await runQuoteDrivers(event.text, routing);
+          const { sent, hasUnwrapped: rawUnwrapped } = dispatchResultText(driven.cleanedText, routing);
+          // If the driver delivered (quote card / boss-check / nudge), the
+          // customer got a message this turn — an unwrapped-prose nudge
+          // would only trigger a duplicate re-send.
+          const hasUnwrapped = rawUnwrapped && !driven.acted;
+          if (sent === 0 && !driven.acted && event.isError === true) {
             // Non-retryable error turn (e.g. a 403 billing_error) with no
             // <message> envelope: deliver the notice instead of dropping it as
             // scratchpad, and skip the re-wrap nudge — it would just re-hammer
