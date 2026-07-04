@@ -119,6 +119,47 @@ export interface ConversationSummary {
 }
 
 // ---------------------------------------------------------------------------
+// Engram memory (GET /webhook/web/memory)
+// ---------------------------------------------------------------------------
+
+export interface MemoryEpisode {
+  content: string;
+  sourceChannel: string;
+  /** 0–1 */
+  importance: number;
+  accessCount: number;
+  pinned: boolean;
+  status: string;
+  createdAt: number;
+  lastAccessedAt: number;
+}
+
+export interface MemoryNote {
+  title: string;
+  body: string;
+  /** 0–1 */
+  confidence: number;
+  kind: string;
+  updatedAt: number;
+}
+
+export interface MemoryEntity {
+  name: string;
+  type: string;
+  /** 0–1 */
+  salience: number;
+}
+
+export interface MemorySnapshot {
+  /** false = Engram Postgres container unreachable */
+  available: boolean;
+  tenant: string;
+  episodes: MemoryEpisode[];
+  notes: MemoryNote[];
+  entities: MemoryEntity[];
+}
+
+// ---------------------------------------------------------------------------
 // Parsing / normalization helpers
 // The backend sometimes returns raw DB rows (snake_case) and sometimes typed
 // records (camelCase); every reader below tolerates both.
@@ -267,6 +308,73 @@ export function normalizeConversation(raw: unknown): ConversationSummary | null 
     lastTs: toMillis(pick(r, "lastTs", "last_ts")),
     lastType: String(pick(r, "lastType", "last_type") ?? ""),
     preview: String(r.preview ?? ""),
+  };
+}
+
+/** Clamp an arbitrary value into the [0, 1] range (importance / confidence / salience). */
+function toFraction(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(1, Math.max(0, n));
+}
+
+function normalizeMemoryEpisode(raw: unknown): MemoryEpisode | null {
+  if (!isRecord(raw)) return null;
+  const r = raw;
+  return {
+    content: String(r.content ?? ""),
+    sourceChannel: String(pick(r, "sourceChannel", "source_channel") ?? ""),
+    importance: toFraction(r.importance),
+    accessCount: Number(pick(r, "accessCount", "access_count") ?? 0) || 0,
+    pinned: Boolean(r.pinned),
+    status: String(r.status ?? ""),
+    createdAt: toMillis(pick(r, "createdAt", "created_at")),
+    lastAccessedAt: toMillis(pick(r, "lastAccessedAt", "last_accessed_at")),
+  };
+}
+
+function normalizeMemoryNote(raw: unknown): MemoryNote | null {
+  if (!isRecord(raw)) return null;
+  const r = raw;
+  return {
+    title: String(r.title ?? ""),
+    body: String(r.body ?? ""),
+    confidence: toFraction(r.confidence),
+    kind: String(r.kind ?? ""),
+    updatedAt: toMillis(pick(r, "updatedAt", "updated_at")),
+  };
+}
+
+function normalizeMemoryEntity(raw: unknown): MemoryEntity | null {
+  if (!isRecord(raw)) return null;
+  const r = raw;
+  const name = String(r.name ?? "");
+  if (!name) return null;
+  return {
+    name,
+    type: String(r.type ?? ""),
+    salience: toFraction(r.salience),
+  };
+}
+
+/** Normalize the /memory endpoint response (tolerates missing sections). */
+export function normalizeMemory(raw: unknown): MemorySnapshot {
+  const r = isRecord(raw) ? raw : {};
+  const episodes = Array.isArray(r.episodes) ? r.episodes : [];
+  const notes = Array.isArray(r.notes) ? r.notes : [];
+  const entities = Array.isArray(r.entities) ? r.entities : [];
+  return {
+    available: Boolean(r.available),
+    tenant: String(r.tenant ?? ""),
+    episodes: episodes
+      .map(normalizeMemoryEpisode)
+      .filter((e): e is MemoryEpisode => e !== null),
+    notes: notes
+      .map(normalizeMemoryNote)
+      .filter((n): n is MemoryNote => n !== null),
+    entities: entities
+      .map(normalizeMemoryEntity)
+      .filter((e): e is MemoryEntity => e !== null),
   };
 }
 

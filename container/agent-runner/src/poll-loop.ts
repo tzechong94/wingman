@@ -13,8 +13,8 @@ import {
   stripInternalTags,
   type RoutingContext,
 } from './formatter.js';
-import { handleQuoteDraft, runQuoteDrivers } from './quotes/driver.js';
-import { extractQuoteDraft } from './quotes/extractor.js';
+import { consumePendingQuoteNote, handleQuoteDraft, runQuoteDrivers, setPendingQuoteNote } from './quotes/driver.js';
+import { extractQuoteDecision } from './quotes/extractor.js';
 import { sanitizeNarratedToolTags } from './quotes/sanitize.js';
 import { enrichPromptWithVision } from './quotes/vision.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
@@ -230,6 +230,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Wingman: photos in the batch get a trusted Qwen-VL description appended
     // pre-turn (deterministic — the model never invokes a vision tool).
     prompt = await enrichPromptWithVision(prompt, keep);
+    prompt = consumePendingQuoteNote() + prompt;
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
@@ -427,7 +428,7 @@ export async function processQuery(
         if (done) return;
 
         const keptIds = keep.map((m) => m.id);
-        const prompt = formatMessages(keep);
+        const prompt = consumePendingQuoteNote() + formatMessages(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
         quoteExtracted = false;
@@ -506,11 +507,41 @@ export async function processQuery(
           // temperature-0 extraction over the transcript + rate card decides
           // quotability and produces the draft — same driver, same rules.
           if (expectsReply && !driven.acted && !quoteExtracted) {
-            const draft = await extractQuoteDraft(driven.cleanedText);
+            const { draft, notQuotableReason } = await extractQuoteDecision(driven.cleanedText);
+            // Not quotable AND the prose didn't ask the customer anything →
+            // the customer would stare at a dead holding line. Make the model
+            // ask for exactly the missing fact.
+            if (!draft && notQuotableReason && !driven.cleanedText.includes('?') && !silentNudged) {
+              silentNudged = true;
+              log(`Holding line without a question — pushing missing-fact nudge (${notQuotableReason})`);
+              query.push(
+                `<system>The quoting system cannot quote yet: ${notQuotableReason}. ` +
+                  `Ask the customer ONE short question for exactly that missing detail, in a <message> block.</system>`,
+              );
+            }
             if (draft) {
               quoteExtracted = true;
               const res = await handleQuoteDraft(draft, routing);
-              driven.acted = driven.acted || res.handled;
+              if (res.handled) {
+                driven.acted = true;
+                // The model's prose was composed BEFORE the quoting system
+                // acted — sending it after the card produces stale scoping
+                // questions ("what service do you need?" under a quote for
+                // that exact service). Drop the prose: the card/boss-line IS
+                // this turn's reply.
+                driven.cleanedText = '';
+                // And cure the blindness for FUTURE turns: tell the model
+                // what the quoting system just did, in its own session.
+                const summary = draft.lineItems
+                  .map((li) => `${li.description} x${li.qty}`)
+                  .join('; ');
+                setPendingQuoteNote(
+                  `<system>The quoting system has ${res.autoSent ? 'SENT the customer a formal quote card' : 'escalated a quote to the boss for approval (customer was told to wait)'}: ` +
+                    `${summary}${draft.discountPct ? `, ${draft.discountPct}% discount requested` : ''}. ` +
+                    `Do NOT re-ask scoping questions about this request and do not mention prices. ` +
+                    `Respond only to the customer's message below.</system>`,
+                );
+              }
             }
           }
           const { sent, hasUnwrapped: rawUnwrapped } = dispatchResultText(driven.cleanedText, routing);

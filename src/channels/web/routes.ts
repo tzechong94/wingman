@@ -52,6 +52,7 @@ import {
   resetVisitor,
   resolveApprovalFromDashboard,
 } from './adapter.js';
+import { getMemorySnapshot } from './memory-view.js';
 import { attachSse } from './sse.js';
 
 const MAX_BODY_BYTES = 6 * 1024 * 1024; // images ≤5MB + JSON envelope
@@ -309,6 +310,16 @@ async function handle(req: Req, res: Res): Promise<void> {
         }
         resolveApprovalFromDashboard(id, decision);
         json(res, 202, { ok: true });
+        return;
+      }
+
+      case 'GET memory': {
+        if (!isOwner(req)) {
+          json(res, 403, { error: 'Owner only.' });
+          return;
+        }
+        const tenant = process.env.ENGRAM_TENANT_ID || process.env.WINGMAN_GROUP_FOLDER || 'coolbreeze';
+        json(res, 200, await getMemorySnapshot(tenant));
         return;
       }
 

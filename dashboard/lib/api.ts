@@ -1,12 +1,14 @@
 import {
   normalizeApproval,
   normalizeConversation,
+  normalizeMemory,
   normalizeQuote,
   parseConvEvent,
   type Analytics,
   type ApprovalItem,
   type ConvEvent,
   type ConversationSummary,
+  type MemorySnapshot,
   type QuoteRecord,
 } from "./types";
 
@@ -145,6 +147,11 @@ export const api = {
     return (res.conversations ?? [])
       .map(normalizeConversation)
       .filter((c): c is ConversationSummary => c !== null);
+  },
+
+  async memory(): Promise<MemorySnapshot> {
+    const res = await get<unknown>("/memory");
+    return normalizeMemory(res);
   },
 
   reset(): Promise<SessionInfo> {

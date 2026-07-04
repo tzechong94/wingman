@@ -133,12 +133,20 @@ export async function extractQuoteDraft(
   latestReply: string,
   transcript = getRecentTranscript(),
 ): Promise<QuoteDraft | null> {
+  return (await extractQuoteDecision(latestReply, transcript)).draft;
+}
+
+/** Full decision: the draft when quotable, else the model's stated reason. */
+export async function extractQuoteDecision(
+  latestReply: string,
+  transcript = getRecentTranscript(),
+): Promise<{ draft: QuoteDraft | null; notQuotableReason: string | null }> {
   const key = process.env.DASHSCOPE_API_KEY || process.env.OPENAI_API_KEY;
   const base = process.env.OPENAI_BASE_URL || process.env.DASHSCOPE_BASE_URL;
-  if (!key || !base) return null;
+  if (!key || !base) return { draft: null, notQuotableReason: null };
 
   const rateCard = readWorkspaceFile('/workspace/agent/rate-card.md');
-  if (!rateCard) return null; // no rate card → nothing to ground a quote in
+  if (!rateCard) return { draft: null, notQuotableReason: null }; // no rate card → nothing to ground a quote in
   const rules = parseHouseRules(readWorkspaceFile('/workspace/agent/house-rules.json') || '{}');
 
   const convo =
@@ -158,6 +166,7 @@ export async function extractQuoteDraft(
     `- Judge quotability ONLY from what the CUSTOMER has said (anywhere in the transcript): quotable=true when the ` +
     `customer's messages establish unit count, unit type (wall-mounted / ceiling cassette / window), and the needed service. ` +
     `IGNORE the assistant's own questions — assistants over-ask; a redundant assistant question never blocks a quote.\n` +
+    `- When the customer chose a service in answer to a which-service question, quote ONLY the chosen service — do not also add diagnostic/repair items they did not pick.\n` +
     `- quotable=false if a FORMAL QUOTE CARD was already sent AND the customer has asked nothing new since — formal cards begin with "📋 Quote from" or "Good news — the boss approved". ` +
     `A price merely mentioned in assistant prose is NOT a formal quote. BUT if the customer asks anything new AFTER the card ` +
     `(a discount, more units, a different service), that IS quotable again: re-quote the same items with the change applied ` +
@@ -191,11 +200,11 @@ export async function extractQuoteDraft(
       });
       if (!res.ok) {
         log(`extraction HTTP ${res.status}`);
-        return null;
+        return { draft: null, notQuotableReason: null };
       }
       const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       const raw = body.choices?.[0]?.message?.content;
-      if (!raw) return null;
+      if (!raw) return { draft: null, notQuotableReason: null };
       const parsed = JSON.parse(raw) as {
         quotable?: boolean;
         reason?: string;
@@ -207,7 +216,7 @@ export async function extractQuoteDraft(
       };
       if (!parsed.quotable) {
         log(`not quotable: ${parsed.reason ?? 'no reason'}`);
-        return null;
+        return { draft: null, notQuotableReason: parsed.reason ?? 'details still missing' };
       }
       const card = parseRateCard(rateCard);
       const lineItems = resolveFlatItems(parsed.items ?? '', parsed.offCard ?? '', card);
@@ -233,16 +242,16 @@ export async function extractQuoteDraft(
       });
       if (typeof draft === 'string') {
         log(`extraction draft invalid (attempt ${attempt}): ${draft}`);
-        return null;
+        return { draft: null, notQuotableReason: null };
       }
       log(`extracted quote (attempt ${attempt}): ${draft.lineItems.length} item(s), total ${draft.totalCents}`);
-      return draft;
+      return { draft, notQuotableReason: null };
     } catch (err) {
       log(`extraction failed: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
+      return { draft: null, notQuotableReason: null };
     } finally {
       clearTimeout(timer);
     }
   }
-  return null;
+  return { draft: null, notQuotableReason: null };
 }

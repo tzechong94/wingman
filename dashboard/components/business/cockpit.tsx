@@ -15,6 +15,7 @@ import {
 } from "react";
 import {
   ActivityIcon,
+  BrainIcon,
   FileTextIcon,
   LoaderIcon,
   LockIcon,
@@ -25,10 +26,11 @@ import { Button, Card, CenteredState, Spinner, Tabs } from "../ui";
 import { ActivityFeed } from "./activity";
 import { ApprovalsQueue } from "./approvals";
 import { ConversationsTab } from "./conversations";
+import { MemoryTab } from "./memory-tab";
 import { QuotesTab } from "./quotes-tab";
 
 type AuthPhase = "checking" | "need_token" | "authed" | "error";
-type TabValue = "activity" | "conversations" | "quotes";
+type TabValue = "activity" | "conversations" | "quotes" | "memory";
 
 const MAX_ACTIVITY_ITEMS = 200;
 
@@ -297,6 +299,11 @@ function Cockpit({
                   label: "Quotes",
                   icon: <FileTextIcon className="size-3.5" />,
                 },
+                {
+                  value: "memory",
+                  label: "Memory",
+                  icon: <BrainIcon className="size-3.5" />,
+                },
               ]}
             />
           </div>
@@ -319,6 +326,7 @@ function Cockpit({
                 onReload={reloadQuotes}
               />
             )}
+            {tab === "memory" && <MemoryTab />}
           </div>
         </Card>
       </div>

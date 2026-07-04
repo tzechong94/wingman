@@ -179,6 +179,23 @@ export function defaultDeps(): DriverDeps {
   };
 }
 
+/* ── deferred context notes ─────────────────────────────────────────────────
+ * Notes for the MODEL about what the quoting system did. Delivered by
+ * prepending to the NEXT prompt (not query.push) — an immediate push makes
+ * the model produce a stray visible reply ("one moment!") after the card. */
+
+let pendingQuoteNote = '';
+
+export function setPendingQuoteNote(note: string): void {
+  pendingQuoteNote = note;
+}
+
+export function consumePendingQuoteNote(): string {
+  const n = pendingQuoteNote;
+  pendingQuoteNote = '';
+  return n ? `${n}\n` : '';
+}
+
 /* ── the driver ── */
 
 export interface DriveResult {
