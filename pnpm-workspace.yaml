@@ -1,8 +1,19 @@
+packages:
+  - dashboard
+
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild
   - protobufjs
   - sharp
+
+# enhanced-resolve@5.24.x (transitive dep of @tailwindcss/node via dashboard)
+# is 403-blocked on the configured Artifactory registry; pin the newest
+# fetchable version that still satisfies the ^5.18.1 range.
+overrides:
+  enhanced-resolve: 5.18.3
+  tar: 7.5.7
+  caniuse-lite: 1.0.30001780
 
 pnpm:
   minimumReleaseAge: 4320

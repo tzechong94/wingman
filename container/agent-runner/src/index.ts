@@ -52,7 +52,39 @@ async function main(): Promise<void> {
   // /workspace/agent/CLAUDE.md — the composed entry imports the shared
   // base (/app/CLAUDE.md) and each enabled module's fragment. Per-group
   // memory lives in /workspace/agent/CLAUDE.local.md (auto-loaded).
-  const instructions = buildSystemPromptAddendum(config.assistantName || undefined);
+  let instructions = buildSystemPromptAddendum(config.assistantName || undefined);
+
+  // Non-Claude providers don't auto-read the workspace context files the way
+  // Claude Code does — without this, the group persona (CLAUDE.local.md)
+  // never reaches the model at all. ONLY the persona file is injected: the
+  // composed CLAUDE.md is full of Claude-Code tool instructions
+  // (ask_user_question, ncl, skills) that a text-only provider can't invoke
+  // — feeding them in just teaches it to narrate fake tool tags.
+  if (providerName !== 'claude') {
+    try {
+      const persona = fs.readFileSync('/workspace/agent/CLAUDE.local.md', 'utf8').trim();
+      if (persona) instructions += `\n\n${persona}`;
+    } catch {
+      /* file absent — fine */
+    }
+    // Inline the small grounding files too. A text-first provider that has to
+    // READ files turns every customer turn into a minutes-long agentic
+    // exploration; with the data in-context the turn is a single completion.
+    const groundingFiles = ['rate-card.md', 'house-rules.json', 'customers.md'];
+    const grounding: string[] = [];
+    for (const f of groundingFiles) {
+      try {
+        const content = fs.readFileSync(`/workspace/agent/${f}`, 'utf8').trim();
+        if (content) grounding.push(`### ${f}\n${content}`);
+      } catch {
+        /* absent — fine */
+      }
+    }
+    if (grounding.length) {
+      instructions +=
+        `\n\n## Reference data (ALREADY LOADED — never search or read files for these)\n\n` + grounding.join('\n\n');
+    }
+  }
 
   // Discover additional directories mounted at /workspace/extra/*
   const additionalDirectories: string[] = [];

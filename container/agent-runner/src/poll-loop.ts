@@ -13,7 +13,9 @@ import {
   stripInternalTags,
   type RoutingContext,
 } from './formatter.js';
-import { runQuoteDrivers } from './quotes/driver.js';
+import { handleQuoteDraft, runQuoteDrivers } from './quotes/driver.js';
+import { extractQuoteDraft } from './quotes/extractor.js';
+import { sanitizeNarratedToolTags } from './quotes/sanitize.js';
 import { enrichPromptWithVision } from './quotes/vision.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
@@ -253,6 +255,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         config.provider.onExchangeComplete?.bind(config.provider),
         prompt,
         continuation,
+        keep.some((m) => m.kind === 'chat' || m.kind === 'chat-sdk'),
       );
       if (result.continuation && result.continuation !== continuation) {
         continuation = result.continuation;
@@ -337,10 +340,13 @@ export async function processQuery(
   onExchangeComplete: ((exchange: ProviderExchange) => void) | undefined,
   initialPrompt: string,
   initialContinuation: string | undefined,
+  expectsReply = false,
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
   let unwrappedNudged = false;
+  let quoteExtracted = false;
+  let silentNudged = false;
   // Prompt queue for the exchange hook — each result event consumes the
   // oldest unanswered prompt, except a wrapping-retry result, which answers
   // the same prompt again. Unused (and unmaintained) when the provider
@@ -424,6 +430,7 @@ export async function processQuery(
         const prompt = formatMessages(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
+        quoteExtracted = false;
         query.push(prompt);
         archivePrompts.push(prompt);
         markCompleted(keptIds);
@@ -492,7 +499,33 @@ export async function processQuery(
           // deterministically (the model drafts; trusted code sends). The
           // prose continues through the normal dispatch below.
           const driven = await runQuoteDrivers(event.text, routing);
+          // Customers never see narrated tool markup — convert it to prose.
+          driven.cleanedText = sanitizeNarratedToolTags(driven.cleanedText);
+          // Reliability backstop: qwen converses well but emits QUOTE_JSON
+          // unreliably. When a customer turn ends without one, a focused
+          // temperature-0 extraction over the transcript + rate card decides
+          // quotability and produces the draft — same driver, same rules.
+          if (expectsReply && !driven.acted && !quoteExtracted) {
+            const draft = await extractQuoteDraft(driven.cleanedText);
+            if (draft) {
+              quoteExtracted = true;
+              const res = await handleQuoteDraft(draft, routing);
+              driven.acted = driven.acted || res.handled;
+            }
+          }
           const { sent, hasUnwrapped: rawUnwrapped } = dispatchResultText(driven.cleanedText, routing);
+          // A customer-chat turn that produced NOTHING visible (internal-only
+          // scratchpad, no driver action) leaves the customer staring at a
+          // dead chat. Push a reply-now nudge once. Task turns are exempt —
+          // "output only <internal>done</internal>" is their success case.
+          if (expectsReply && sent === 0 && !driven.acted && !rawUnwrapped && !silentNudged && event.isError !== true) {
+            silentNudged = true;
+            log('Silent chat turn (internal-only) — pushing reply-now nudge');
+            query.push(
+              '<system>Your turn produced no customer-visible reply — only internal notes. The customer is waiting. ' +
+                'Respond NOW with a <message to="..."> block (ask your scoping question or answer them).</system>',
+            );
+          }
           // If the driver delivered (quote card / boss-check / nudge), the
           // customer got a message this turn — an unwrapped-prose nudge
           // would only trigger a duplicate re-send.

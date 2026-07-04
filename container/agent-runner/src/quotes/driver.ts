@@ -63,7 +63,11 @@ export interface ExtractResult {
   parseError?: string;
 }
 
-const BLOCK_RE = new RegExp('```' + QUOTE_BLOCK_FENCE + '\\s*([\\s\\S]*?)```', 'g');
+// Models emit the block as a ``` fence OR as an XML-ish tag — accept both.
+const BLOCK_RE = new RegExp(
+  '(?:```' + QUOTE_BLOCK_FENCE + '\\s*([\\s\\S]*?)```|<' + QUOTE_BLOCK_FENCE + '>\\s*([\\s\\S]*?)</' + QUOTE_BLOCK_FENCE + '>)',
+  'g',
+);
 
 /**
  * Find the first fenced QUOTE_JSON block anywhere in the model output
@@ -75,7 +79,7 @@ export function extractQuoteBlock(text: string): ExtractResult {
   if (matches.length === 0) return { draft: null, cleanedText: text };
 
   const cleanedText = text.replace(BLOCK_RE, '').replace(/\n{3,}/g, '\n\n');
-  const raw = matches[0][1].trim();
+  const raw = (matches[0][1] ?? matches[0][2] ?? '').trim();
 
   let parsed: unknown;
   try {
@@ -84,13 +88,13 @@ export function extractQuoteBlock(text: string): ExtractResult {
     return { draft: null, cleanedText, parseError: `invalid JSON: ${e instanceof Error ? e.message : String(e)}` };
   }
 
-  const draft = validateDraft(parsed);
+  const draft = validateDraftObject(parsed);
   if (typeof draft === 'string') return { draft: null, cleanedText, parseError: draft };
   return { draft, cleanedText };
 }
 
-/** Validate + normalize a parsed block into a QuoteDraft, or return an error string. */
-function validateDraft(obj: unknown): QuoteDraft | string {
+/** Validate + normalize a parsed draft object into a QuoteDraft, or return an error string. */
+export function validateDraftObject(obj: unknown): QuoteDraft | string {
   if (typeof obj !== 'object' || obj === null) return 'block is not an object';
   const o = obj as Record<string, unknown>;
 
@@ -357,7 +361,7 @@ export function formatQuoteText(record: QuoteRecord, rules: HouseRules): string 
 
 /* ── nudge drafts (follow-up turns) ── */
 
-const NUDGE_RE = /```NUDGE_JSON\s*([\s\S]*?)```/g;
+const NUDGE_RE = /(?:```NUDGE_JSON\s*([\s\S]*?)```|<NUDGE_JSON>\s*([\s\S]*?)<\/NUDGE_JSON>)/g;
 
 export interface NudgeExtract {
   nudge: { quoteId: string; text: string } | null;
@@ -369,7 +373,7 @@ export function extractNudgeBlock(text: string): NudgeExtract {
   if (matches.length === 0) return { nudge: null, cleanedText: text };
   const cleanedText = text.replace(NUDGE_RE, '').replace(/\n{3,}/g, '\n\n');
   try {
-    const o = JSON.parse(matches[0][1].trim()) as Record<string, unknown>;
+    const o = JSON.parse((matches[0][1] ?? matches[0][2] ?? '').trim()) as Record<string, unknown>;
     const quoteId = typeof o.quoteId === 'string' ? o.quoteId : '';
     const textVal = typeof o.text === 'string' ? o.text.trim() : '';
     if (!textVal) return { nudge: null, cleanedText };

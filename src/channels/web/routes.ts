@@ -38,6 +38,7 @@ import {
   getWebVisitor,
   listQuotes,
 } from '../../db/quotes.js';
+import { readEnvFile } from '../../env.js';
 import { log } from '../../log.js';
 import { openInboundDb } from '../../session-manager.js';
 import { wakeContainer } from '../../container-runner.js';
@@ -122,8 +123,12 @@ async function readJson(req: Req, res: Res): Promise<Record<string, unknown> | n
   }
 }
 
+let cachedToken: string | null = null;
 function ownerToken(): string {
-  return process.env.WINGMAN_DEMO_TOKEN || '';
+  if (cachedToken === null) {
+    cachedToken = process.env.WINGMAN_DEMO_TOKEN || readEnvFile(['WINGMAN_DEMO_TOKEN']).WINGMAN_DEMO_TOKEN || '';
+  }
+  return cachedToken;
 }
 
 function isOwner(req: Req): boolean {
