@@ -131,7 +131,21 @@ function ownerToken(): string {
   return cachedToken;
 }
 
+let cachedOpenDemo: boolean | null = null;
+/** Hackathon mode: WINGMAN_OPEN_DEMO=true makes the business view public —
+ *  judges self-serve with zero friction. Customer chats stay per-visitor
+ *  (the dashboard filters by its own session). Unset it after judging to
+ *  restore the demo-token gate. */
+function openDemo(): boolean {
+  if (cachedOpenDemo === null) {
+    const v = process.env.WINGMAN_OPEN_DEMO || readEnvFile(['WINGMAN_OPEN_DEMO']).WINGMAN_OPEN_DEMO || '';
+    cachedOpenDemo = v.toLowerCase() === 'true';
+  }
+  return cachedOpenDemo;
+}
+
 function isOwner(req: Req): boolean {
+  if (openDemo()) return true;
   const token = ownerToken();
   return token !== '' && cookies(req)[OWNER_COOKIE] === token;
 }
