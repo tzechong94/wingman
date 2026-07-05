@@ -11,7 +11,6 @@
  */
 import { getSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
-import type { InboundEvent } from '../../channels/adapter.js';
 import type { Session } from '../../types.js';
 import { notifyAgent } from '../approvals/primitive.js';
 import { recordConvEvent } from './actions.js';
@@ -45,32 +44,19 @@ export function applyOwnerInstruction(session: Session, text: string, quoteId: s
 }
 
 /**
- * Router interceptor: a DM from an approver who rejected something in the
- * last 10 minutes is an instruction, not a chat message. One-shot per
- * rejection. Returns true to consume the message.
+ * If `userId` rejected something in the last 10 minutes, consume their text
+ * as the binding instruction for that rejection. One-shot per rejection.
+ * Called by the owner-command interceptor before command parsing.
  */
-export async function ownerInstructionInterceptor(event: InboundEvent): Promise<boolean> {
-  if (recentRejections.size === 0) return false;
-  let senderId = '';
-  let text = '';
-  try {
-    const content = JSON.parse(event.message.content) as { senderId?: string; text?: string };
-    senderId = String(content.senderId ?? '');
-    text = String(content.text ?? '').trim();
-  } catch {
-    return false;
-  }
-  if (!senderId || !text) return false;
-  const userId = senderId.includes(':') ? senderId : `${event.channelType}:${senderId}`;
+export async function consumePendingInstructionFor(userId: string, text: string): Promise<boolean> {
   const pending = recentRejections.get(userId);
   if (!pending) return false;
   if (Date.now() - pending.rejectedAt > INSTRUCTION_WINDOW_MS) {
     recentRejections.delete(userId);
     return false;
   }
-  // Commands are never instructions.
-  if (text.startsWith('/')) return false;
-
+  // Bare re-approvals/status asks are commands, not instructions.
+  if (/^(status|pending|approve|yes|ok(ay)?)\b/i.test(text.trim())) return false;
   recentRejections.delete(userId);
   const session = getSession(pending.sessionId);
   if (!session) return false;

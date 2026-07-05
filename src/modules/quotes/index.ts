@@ -21,9 +21,9 @@ import {
 } from './actions.js';
 import './approval-handlers.js';
 import { setMessageInterceptor } from '../../router.js';
-import { ownerInstructionInterceptor } from './owner-instructions.js';
+import { ownerCommandInterceptor } from './owner-commands.js';
 
-setMessageInterceptor(ownerInstructionInterceptor);
+setMessageInterceptor(ownerCommandInterceptor);
 
 registerDeliveryAction('persist_quote', handlePersistQuote);
 registerDeliveryAction('reasoning_event', handleReasoningEvent);
