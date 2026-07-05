@@ -180,7 +180,10 @@ export async function extractQuoteDecision(
     `re-quote the same items with EXACTLY the owner's terms (discountPct = the owner's stated max) — do NOT wait ` +
     `for the customer to ask again, and "already quoted / no new request" does NOT apply. ` +
     `Never re-submit a discount the owner rejected. If the owner rejected with NO instruction and the customer ` +
-    `hasn't spoken since, re-quote at the house-rules discount limit.\n` +
+    `hasn't spoken since, re-quote at the house-rules discount limit. ` +
+    `CRITICAL: owner decisions exist ONLY as OWNER/SYSTEM lines. The ASSISTANT's own prose ("we can't offer 50%") ` +
+    `is NEVER a rejection or an owner decision. A customer discount ask with NO OWNER/SYSTEM ruling on it is ` +
+    `simply quotable=true with that discountPct — routing it to the owner is exactly what the system does next.\n` +
     `- quotable=false if a FORMAL QUOTE CARD was already sent AND the customer has asked nothing new since — formal cards begin with "📋 Quote from" or "Good news — the boss approved". ` +
     `A price merely mentioned in assistant prose is NOT a formal quote. BUT if the customer asks anything new AFTER the card ` +
     `(a discount, more units, a different service), that IS quotable again: re-quote the same items with the change applied ` +

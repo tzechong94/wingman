@@ -352,8 +352,11 @@ async function handle(req: Req, res: Res): Promise<void> {
           json(res, 400, { error: 'decision must be "approve" or "reject".' });
           return;
         }
-        resolveApprovalFromDashboard(id, decision);
         // Optional owner note on reject ("max 20%") → binding instruction.
+        // Applied BEFORE the resolution dispatch so the instruction and the
+        // rejection land in the same agent batch — otherwise the agent races
+        // ahead and re-quotes at the house-limit fallback before the note
+        // arrives.
         const note = typeof body.note === 'string' ? body.note.trim() : '';
         if (decision === 'reject' && note) {
           const approvalRow = getPendingApproval(id);
@@ -361,16 +364,14 @@ async function handle(req: Req, res: Res): Promise<void> {
           if (noteSession) {
             const payload = safeParse(approvalRow!.payload) as { quote?: { id?: string }; quoteId?: string } | null;
             const { applyOwnerInstruction } = await import('../../modules/quotes/owner-instructions.js');
-            // Small delay so the instruction lands AFTER the reject notice in the transcript.
-            setTimeout(() => {
-              try {
-                applyOwnerInstruction(noteSession, note, payload?.quote?.id ?? payload?.quoteId ?? id);
-              } catch (err) {
-                log.warn('Owner note application failed', { id, err });
-              }
-            }, 1500);
+            try {
+              applyOwnerInstruction(noteSession, note, payload?.quote?.id ?? payload?.quoteId ?? id);
+            } catch (err) {
+              log.warn('Owner note application failed', { id, err });
+            }
           }
         }
+        resolveApprovalFromDashboard(id, decision);
         json(res, 202, { ok: true });
         return;
       }
