@@ -223,9 +223,22 @@ export function inboundFromVisitor(
  */
 export async function ownerReplyToSession(sessionId: string, text: string): Promise<void> {
   const session = getSession(sessionId);
-  if (!session || session.status !== 'active') throw new Error('session not active');
+  if (!session) throw new Error('This is seeded demo history — no live customer behind it.');
   const mg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
   if (!mg) throw new Error('session has no origin messaging group');
+
+  // A closed session (idle-reaped) reawakens on owner reply: same session id,
+  // same transcript, same on-disk DBs — the container respawns on wake and
+  // the customer's browser reattaches to it via their visitor cookie.
+  if (session.status !== 'active') {
+    updateSession(session.id, { status: 'active' });
+    session.status = 'active';
+    if (mg.channel_type === WEB_CHANNEL) {
+      const visitor = getWebVisitor(mg.platform_id);
+      if (visitor && visitor.session_id !== session.id) setWebVisitorSession(mg.platform_id, session.id);
+    }
+    log.info('Closed session reawakened by owner reply', { sessionId });
+  }
 
   const { getDeliveryAdapter } = await import('../../delivery.js');
   const adapter = getDeliveryAdapter();

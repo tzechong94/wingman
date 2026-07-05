@@ -136,8 +136,19 @@ export function ChatList({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline justify-between gap-2">
-                      <span className="truncate text-sm font-medium text-ink">
-                        {conversationName(c)}
+                      <span className="flex min-w-0 items-baseline gap-1.5">
+                        <span className="truncate text-sm font-medium text-ink">
+                          {conversationName(c)}
+                        </span>
+                        {c.sessionId.startsWith("seed-sess-") ? (
+                          <span className="shrink-0 rounded border border-line px-1 text-[9px] uppercase tracking-wide text-faint">
+                            History
+                          </span>
+                        ) : (
+                          <span className="shrink-0 text-[9px] text-faint tabular-nums">
+                            #{shortId(c.sessionId, 4)}
+                          </span>
+                        )}
                       </span>
                       <span className="shrink-0 text-[10px] text-faint tabular-nums">
                         {timeAgo(c.lastTs)}
