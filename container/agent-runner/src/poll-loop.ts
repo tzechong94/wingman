@@ -348,6 +348,7 @@ export async function processQuery(
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
+  resetDuplicateSends(); // dedup is per-query — see isDuplicateSend
   let unwrappedNudged = false;
   let quoteExtracted = false;
   let silentNudged = false;
@@ -403,6 +404,20 @@ export async function processQuery(
         // host-generated welcome trigger with null thread vs a Discord DM reply).
         const newMessages = pending.filter((m) => m.kind !== 'system');
         if (newMessages.length === 0) return;
+
+        // RELIABILITY MODE (default): don't push follow-ups into the live
+        // ACP query — qwen-code re-emits prior results after each push and
+        // sometimes answers against stale turn state (observed: customers
+        // stuck in question loops). Instead, END the query after its current
+        // turn; the outer loop re-queries with the stored continuation, so
+        // every message gets a fresh single-result turn with full history.
+        // Set WINGMAN_PUSH_MODE=1 to restore in-query pushes.
+        if (process.env.WINGMAN_PUSH_MODE !== '1') {
+          log(`Follow-up arrived — ending query for fresh-turn processing (${newMessages.length} pending)`);
+          done = true;
+          query.end();
+          return;
+        }
 
         const newIds = newMessages.map((m) => m.id);
         markProcessing(newIds);
@@ -516,15 +531,24 @@ export async function processQuery(
           // quotability and produces the draft — same driver, same rules.
           if (expectsReply && !driven.acted && !quoteExtracted) {
             const { draft, notQuotableReason } = await extractQuoteDecision(driven.cleanedText);
-            // Not quotable AND the prose didn't ask the customer anything →
-            // the customer would stare at a dead holding line. Make the model
-            // ask for exactly the missing fact.
-            if (!draft && notQuotableReason && !driven.cleanedText.includes('?') && !silentNudged) {
+            // Not quotable AND the prose doesn't address the missing fact →
+            // the model asked nothing, or asked the WRONG question (e.g.
+            // re-asking the address when the unit type is what's missing).
+            // Push the exact gap so the next reply asks the right thing.
+            const reasonKeywords = (notQuotableReason ?? '')
+              .toLowerCase()
+              .split(/[^a-z]+/)
+              .filter((w) => w.length > 3 && !['unknown', 'missing', 'still', 'specified', 'from', 'customer', 'request'].includes(w));
+            const proseAddressesReason =
+              reasonKeywords.length === 0 ||
+              reasonKeywords.some((w) => driven.cleanedText.toLowerCase().includes(w));
+            if (!draft && notQuotableReason && !proseAddressesReason && !silentNudged) {
               silentNudged = true;
-              log(`Holding line without a question — pushing missing-fact nudge (${notQuotableReason})`);
+              log(`Reply misses the quoting gap — pushing missing-fact nudge (${notQuotableReason})`);
               query.push(
                 `<system>The quoting system cannot quote yet: ${notQuotableReason}. ` +
-                  `Ask the customer ONE short question for exactly that missing detail, in a <message> block.</system>`,
+                  `The customer has ALREADY provided everything else — do not re-ask known details. ` +
+                  `Ask ONE short question for exactly that missing detail, in a <message> block.</system>`,
               );
             }
             if (draft) {
@@ -559,10 +583,12 @@ export async function processQuery(
           // "output only <internal>done</internal>" is their success case.
           if (expectsReply && sent === 0 && !driven.acted && !rawUnwrapped && !silentNudged && event.isError !== true) {
             silentNudged = true;
-            log('Silent chat turn (internal-only) — pushing reply-now nudge');
+            log('Silent chat turn (nothing delivered) — pushing reply-now nudge');
             query.push(
-              '<system>Your turn produced no customer-visible reply — only internal notes. The customer is waiting. ' +
-                'Respond NOW with a <message to="..."> block (ask your scoping question or answer them).</system>',
+              '<system>Nothing reached the customer this turn — your reply was either internal-only or an EXACT ' +
+                'REPEAT of an earlier message (repeats are suppressed). The customer is waiting. Respond NOW with a ' +
+                '<message to="..."> block addressing ONLY their latest message — never repeat earlier replies and ' +
+                'never re-ask details they already gave (address, service, times).</system>',
             );
           }
           // If the driver delivered (quote card / boss-check / nudge), the
@@ -708,8 +734,7 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
       continue;
     }
-    sendToDestination(dest, body, routing);
-    sent++;
+    if (sendToDestination(dest, body, routing)) sent++;
   }
   if (lastIndex < text.length) {
     scratchpadParts.push(text.slice(lastIndex));
@@ -728,7 +753,26 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
   return { sent, hasUnwrapped };
 }
 
-function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
+/*
+ * Outbound prose dedup — qwen's ACP stream re-emits PRIOR results within
+ * the SAME query, so without this the customer sees old replies repeated
+ * verbatim. Scoped per-query (reset in processQuery): a legitimate repeat
+ * on a LATER turn (re-asking a question the customer ignored) must deliver.
+ */
+const recentSends = new Set<string>();
+
+export function resetDuplicateSends(): void {
+  recentSends.clear();
+}
+
+export function isDuplicateSend(destKey: string, body: string): boolean {
+  const key = `${destKey}\u0000${body.trim()}`;
+  if (recentSends.has(key)) return true;
+  recentSends.add(key);
+  return false;
+}
+
+function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): boolean {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
   // Resolve thread_id per-destination from the most recent inbound message
@@ -736,6 +780,10 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
   // different destinations have different thread contexts — using a single
   // routing.threadId would stamp one channel's thread onto another.
   const destRouting = resolveDestinationThread(channelType, platformId);
+  if (isDuplicateSend(`${channelType}:${platformId}`, body)) {
+    log(`Duplicate prose suppressed: ${body.slice(0, 60)}…`);
+    return false;
+  }
   writeMessageOut({
     id: generateId(),
     in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
@@ -745,6 +793,7 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
     thread_id: destRouting?.threadId ?? null,
     content: JSON.stringify({ text: body }),
   });
+  return true;
 }
 
 /**
