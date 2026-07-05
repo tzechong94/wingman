@@ -759,6 +759,22 @@ async function main(): Promise<void> {
   addMember({ user_id: 'web:demo-owner', agent_group_id: ag.id, added_by: null, added_at: now });
   console.log('✓ web:demo-owner seeded (admin scoped to CoolBreeze)');
 
+  // 3b. The human owner's Telegram — approvals, FYIs, and owner commands
+  //     route here. Env-driven so the same seed works on any deployment;
+  //     Telegram is direct-addressable, so the DM route is minted lazily on
+  //     first delivery (ensureUserDm) — user + role is all we need.
+  const ownerTg = process.env.WINGMAN_OWNER_TELEGRAM_ID?.trim();
+  if (ownerTg) {
+    const ownerId = `telegram:${ownerTg.replace(/^telegram:/, '')}`;
+    upsertUser({ id: ownerId, kind: 'telegram', display_name: 'Owner', created_at: now });
+    if (!getUserRoles(ownerId).some((r) => r.role === 'owner' && r.agent_group_id === null)) {
+      grantRole({ user_id: ownerId, role: 'owner', agent_group_id: null, granted_by: null, granted_at: now });
+    }
+    console.log(`✓ human owner seeded: ${ownerId} (global owner — Telegram approvals + commands)`);
+  } else {
+    console.log('⚠ WINGMAN_OWNER_TELEGRAM_ID not set — approvals will only reach the dashboard, not Telegram');
+  }
+
   // 4. Backfill history (skip if already present)
   backfillQuotes(db); // always regenerates seed conversations (idempotent by replacement)
 

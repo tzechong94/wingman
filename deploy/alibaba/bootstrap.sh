@@ -64,6 +64,8 @@ QWEN_CHAT_MODEL=qwen-max
 
 # ── Channels ──
 TELEGRAM_BOT_TOKEN=
+# Your Telegram numeric id (@userinfobot) — approvals + owner commands route here
+WINGMAN_OWNER_TELEGRAM_ID=
 NANOCLAW_NATIVE_CREDENTIALS=true
 
 # ── Wingman demo ──
