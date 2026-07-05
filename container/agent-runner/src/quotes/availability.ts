@@ -131,10 +131,14 @@ export async function enrichPromptWithAvailability(prompt: string, batch: Messag
   const slots = await fetchAvailability();
   if (!slots) return prompt;
   log('real slots injected');
+  // Prepended, not appended — trailing system notes get ignored under
+  // variance; leading ones are obeyed (same lesson as the quote notes).
   return (
-    prompt +
-    `\n<system>REAL calendar availability (from the business's booking system): ${slots}. ` +
-    `Offer the customer 2-3 of these exact slots to choose from. When they pick one, ` +
-    `confirm it is locked in — these are genuine openings. Never offer times outside this list.</system>`
+    `<system>MANDATORY for this reply — REAL calendar availability (from the business's booking system): ${slots}. ` +
+    `If the customer's latest message ALREADY PICKS a time matching one of these openings, do NOT re-offer — ` +
+    `confirm their pick is locked in and close warmly. Otherwise your reply MUST offer 2-3 of these exact slots ` +
+    `by name. Never offer times outside this list, and do not ask open-ended "when works for you" questions ` +
+    `when slots are listed here.</system>\n` +
+    prompt
   );
 }

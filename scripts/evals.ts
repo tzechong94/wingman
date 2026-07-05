@@ -286,11 +286,15 @@ const scenarios: Scenario[] = [
       await say(ctx, 'Chemical wash, 1 wall-mounted unit please.');
       const t2 = await say(ctx, 'confirm');
       const reply = texts(t2);
+      // With cal.com configured, offering REAL listed slots (with a choice
+      // question) is the correct behavior; without it, an open logistics
+      // question is. Either passes. Hard fails: unilateral promises.
       const asksLogistics = /address|location|where|when|time|day|works best/i.test(reply);
-      const invents = /\b(mon|tues|wednes|thurs|fri|satur|sun)day\b[^.?!]{0,25}\b\d{1,2}\s*(am|pm|:\d{2})|technician will (be|arrive) (at|on)/i.test(reply);
+      const offersChoice = /\d{1,2}[:.]\d{2}|\d{1,2}\s*(am|pm)/i.test(reply) && reply.includes('?');
+      const promises = /technician will (be|arrive) (at|on)|we('|w)?ll send (you )?a reminder|reminder .{0,20}before/i.test(reply);
       return [
-        { name: 'asks for address/time', pass: asksLogistics, note: reply.slice(0, 90) },
-        { name: 'invents no slot/reminder', pass: !invents },
+        { name: 'asks logistics OR offers slot choice', pass: asksLogistics || offersChoice, note: reply.slice(0, 90) },
+        { name: 'no unilateral promises (arrival/reminders)', pass: !promises },
       ];
     },
   },

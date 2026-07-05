@@ -431,7 +431,12 @@ export async function processQuery(
         if (done) return;
 
         const keptIds = keep.map((m) => m.id);
-        const prompt = consumePendingQuoteNote() + formatMessages(keep);
+        // Same pre-turn enrichments as the initial batch — follow-up pushes
+        // carry photos and booking intent too.
+        let followPrompt = formatMessages(keep);
+        followPrompt = await enrichPromptWithVision(followPrompt, keep);
+        followPrompt = await enrichPromptWithAvailability(followPrompt, keep);
+        const prompt = consumePendingQuoteNote() + followPrompt;
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
         quoteExtracted = false;
