@@ -191,8 +191,18 @@ async function handle(req: Req, res: Res): Promise<void> {
         const existing = visitorId(req);
         if (existing && getWebVisitor(existing)) {
           const session = currentSessionOf(existing);
-          json(res, 200, { visitorId: existing, sessionId: session?.id ?? null, existing: true });
-          return;
+          if (session && session.status === 'active') {
+            json(res, 200, { visitorId: existing, sessionId: session.id, existing: true });
+            return;
+          }
+          // Returning browser whose session was closed (idle reap, reset,
+          // restart): mint a fresh session for the SAME visitor instead of
+          // returning sessionId:null — which the client reads as an outage.
+          const revived = resetVisitor(existing);
+          if (revived) {
+            json(res, 200, { ...revived, existing: true });
+            return;
+          }
         }
         const minted = mintVisitor();
         json(res, 201, minted, { 'Set-Cookie': setCookie(VISITOR_COOKIE, minted.visitorId) });
