@@ -36,6 +36,10 @@ registerProviderContainerConfig('qwen', () => {
     'QWEN_MODE',
     'QWEN_BIN',
     'ENGRAM_REPO_ROOT',
+    'CALCOM_API_KEY',
+    'CALCOM_EVENT_TYPE_ID',
+    'CALCOM_API_BASE',
+    'CALCOM_TIMEZONE',
   ]);
 
   const env: Record<string, string> = {};
@@ -50,6 +54,12 @@ registerProviderContainerConfig('qwen', () => {
 
   if (dotenv.QWEN_MODE) env.QWEN_MODE = dotenv.QWEN_MODE;
   if (dotenv.QWEN_BIN) env.QWEN_BIN = dotenv.QWEN_BIN;
+
+  // cal.com real-availability tool (container-side driver call); unset = off.
+  if (dotenv.CALCOM_API_KEY) env.CALCOM_API_KEY = dotenv.CALCOM_API_KEY;
+  if (dotenv.CALCOM_EVENT_TYPE_ID) env.CALCOM_EVENT_TYPE_ID = dotenv.CALCOM_EVENT_TYPE_ID;
+  if (dotenv.CALCOM_API_BASE) env.CALCOM_API_BASE = dotenv.CALCOM_API_BASE;
+  if (dotenv.CALCOM_TIMEZONE) env.CALCOM_TIMEZONE = dotenv.CALCOM_TIMEZONE;
 
   // The Engram memory MCP server runs INSIDE the container (qwen-code spawns it
   // as a stdio subprocess) but its command is a host path —

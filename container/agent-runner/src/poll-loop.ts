@@ -16,6 +16,7 @@ import {
 import { consumePendingQuoteNote, handleQuoteDraft, runQuoteDrivers, setPendingQuoteNote } from './quotes/driver.js';
 import { extractQuoteDecision } from './quotes/extractor.js';
 import { sanitizeNarratedToolTags } from './quotes/sanitize.js';
+import { enrichPromptWithAvailability } from './quotes/availability.js';
 import { enrichPromptWithVision } from './quotes/vision.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
@@ -230,6 +231,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Wingman: photos in the batch get a trusted Qwen-VL description appended
     // pre-turn (deterministic — the model never invokes a vision tool).
     prompt = await enrichPromptWithVision(prompt, keep);
+    // Booking intent + configured cal.com → real slots injected pre-turn.
+    prompt = await enrichPromptWithAvailability(prompt, keep);
     prompt = consumePendingQuoteNote() + prompt;
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
