@@ -122,6 +122,15 @@ export async function handleReasoningEvent(
   recordConvEvent(session.id, 'reasoning', 'system', event, event.ts);
 }
 
+export async function handleOwnerFyi(
+  content: Record<string, unknown>,
+  session: Session,
+  _inDb: Database.Database,
+): Promise<void> {
+  const text = String(content.text ?? '');
+  if (text) await notifyOwnerFyi(session, text);
+}
+
 export async function handleRequestQuoteApproval(
   content: Record<string, unknown>,
   session: Session,

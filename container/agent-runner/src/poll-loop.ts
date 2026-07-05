@@ -352,6 +352,7 @@ export async function processQuery(
   let unwrappedNudged = false;
   let quoteExtracted = false;
   let silentNudged = false;
+  let bookingHandled = false; // booking replied for this query — drop later model prose
   // Prompt queue for the exchange hook — each result event consumes the
   // oldest unanswered prompt, except a wrapping-retry result, which answers
   // the same prompt again. Unused (and unmaintained) when the provider
@@ -574,6 +575,32 @@ export async function processQuery(
                     `Respond only to the customer's message below.</system>`,
                 );
               }
+            }
+          }
+          // cal.com booking closure BEFORE dispatch: if the customer just
+          // picked an offered slot, trusted code books it and the
+          // confirmation the customer sees is written by the code that
+          // actually booked — the model's guess never reaches them.
+          if (expectsReply) {
+            try {
+              if (bookingHandled) {
+                // Booking already replied for this customer message — any
+                // further model prose this query is a stale guess.
+                driven.cleanedText = '';
+                driven.acted = true;
+              } else {
+                const { maybeBookAppointment } = await import('./quotes/booking.js');
+                const b = await maybeBookAppointment(routing);
+                if (b.handled) {
+                  bookingHandled = true;
+                  // The booking code already messaged the customer with the
+                  // truth — drop the model's guess and skip the nudges.
+                  driven.cleanedText = '';
+                  driven.acted = true;
+                }
+              }
+            } catch (err) {
+              log(`booking hook failed: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
           const { sent, hasUnwrapped: rawUnwrapped } = dispatchResultText(driven.cleanedText, routing);

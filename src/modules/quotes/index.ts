@@ -14,6 +14,7 @@
  */
 import { registerDeliveryAction } from '../../delivery.js';
 import {
+  handleOwnerFyi,
   handlePersistQuote,
   handleReasoningEvent,
   handleRequestNudgeApproval,
@@ -27,5 +28,6 @@ setMessageInterceptor(ownerCommandInterceptor);
 
 registerDeliveryAction('persist_quote', handlePersistQuote);
 registerDeliveryAction('reasoning_event', handleReasoningEvent);
+registerDeliveryAction('owner_fyi', handleOwnerFyi);
 registerDeliveryAction('request_quote_approval', handleRequestQuoteApproval);
 registerDeliveryAction('request_nudge_approval', handleRequestNudgeApproval);
