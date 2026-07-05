@@ -415,14 +415,21 @@ async function handle(req: Req, res: Res): Promise<void> {
           { sessionId: string; customerName: string | null; lastTs: string; preview: string }
         >();
         for (const e of events) {
-          if (!e.session_id.startsWith('seed-sess-') || seen.has(e.session_id)) continue;
-          const p = safeParse(e.payload) as { text?: string };
-          seen.set(e.session_id, {
-            sessionId: e.session_id,
-            customerName: null,
-            lastTs: e.ts,
-            preview: (p.text || '').slice(0, 100),
-          });
+          if (!e.session_id.startsWith('seed-sess-')) continue;
+          const p = safeParse(e.payload) as { text?: string; customerName?: string };
+          const existing = seen.get(e.session_id);
+          if (!existing) {
+            seen.set(e.session_id, {
+              sessionId: e.session_id,
+              // Seeds stamp customerName on their first msg_in — covers
+              // quote-less scenarios (barge-in, warranty Q&A).
+              customerName: p.customerName ?? null,
+              lastTs: e.ts,
+              preview: (p.text || '').slice(0, 100),
+            });
+          } else if (!existing.customerName && p.customerName) {
+            existing.customerName = p.customerName;
+          }
         }
         for (const q of listQuotes(200)) {
           const c = seen.get(q.session_id);

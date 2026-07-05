@@ -87,7 +87,7 @@ export interface RateCardEntry {
 export function parseRateCard(md: string): Map<string, RateCardEntry> {
   const out = new Map<string, RateCardEntry>();
   for (const line of md.split('\n')) {
-    const m = line.match(/^\|\s*(RC-\d+)\s*\|\s*([^|]+?)\s*\|\s*([\d,.]+)\s*\|/);
+    const m = line.match(/^\|\s*(RC-\d+[A-Z]?)\s*\|\s*([^|]+?)\s*\|\s*([\d,.]+)\s*\|/);
     if (!m) continue;
     const priceCents = Math.round(parseFloat(m[3].replace(/,/g, '')) * 100);
     if (Number.isFinite(priceCents)) out.set(m[1], { ref: m[1], description: m[2], priceCents });
@@ -108,7 +108,7 @@ export function resolveFlatItems(
 ): Array<{ description: string; qty: number; unitPriceCents: number; rateCardRef?: string }> | string {
   const lineItems: Array<{ description: string; qty: number; unitPriceCents: number; rateCardRef?: string }> = [];
   for (const part of items.split(/[;,]/).map((x) => x.trim()).filter(Boolean)) {
-    const m = part.match(/^(RC-\d+)\s*(?:x\s*(\d+))?$/i);
+    const m = part.match(/^(RC-\d+[A-Z]?)\s*(?:x\s*(\d+))?$/i);
     if (!m) return `unparseable item "${part}" (expected "RC-xx xN")`;
     const entry = card.get(m[1].toUpperCase());
     if (!entry) return `unknown rate-card ref ${m[1]}`;
@@ -176,8 +176,11 @@ export async function extractQuoteDecision(
     `standard gesture. A named number always wins over the default.\n` +
     `- NEVER emit a draft identical to the last formal quote card (same items, same discount): if nothing about the ` +
     `request changed the quote, quotable=false with reason "identical to last quote".\n` +
-    `- Judge quotability ONLY from what the CUSTOMER has said (anywhere in the transcript): quotable=true when the ` +
-    `customer's messages establish unit count, unit type (wall-mounted / ceiling cassette / window), and the needed service. ` +
+    `- Judge quotability ONLY from what the CUSTOMER has said (anywhere in the transcript). For RATE-CARD unit services: ` +
+    `quotable=true when the customer's messages establish unit count, unit type (wall-mounted / ceiling cassette / window), and the needed service. ` +
+    `For services NOT on the rate card (custom/commercial/structural work): quotable=true as soon as the JOB is clearly ` +
+    `described — no unit count/type needed; include it in offCard with your best estimate so the boss can rule on it.\n` +
+    `- Quantity discounts: when a rate card row exists for a bundle (e.g. RC-01B for 3+ units), you MUST use it when the quantity qualifies.\n` +
     `IGNORE the assistant's own questions — assistants over-ask; a redundant assistant question never blocks a quote.\n` +
     `- When the customer chose a service in answer to a which-service question, quote ONLY the chosen service — do not also add diagnostic/repair items they did not pick.\n` +
     `- OWNER/SYSTEM lines are the BUSINESS OWNER's decisions and outrank everything, INCLUDING every rule below. ` +

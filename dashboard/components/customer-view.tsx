@@ -198,6 +198,9 @@ export function CustomerView() {
         </div>
         {selection.kind === "replay" && (
           <ReplayChat
+            // Keyed by session: useFetch loads once per mount, so switching
+            // chats must remount the pane (else the first transcript sticks).
+            key={selection.sessionId}
             sessionId={selection.sessionId}
             name={selection.name}
             variant={selection.variant}
