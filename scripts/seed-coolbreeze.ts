@@ -300,61 +300,141 @@ async function seedEngram(): Promise<number> {
 
 /* ── backfill ── */
 
-function backfillQuotes(): void {
+function backfillQuotes(db: import('better-sqlite3').Database): void {
+  // Replace any previous backfill wholesale — placeholder rows from older
+  // seed versions read as broken chats in the inbox.
+  db.prepare("DELETE FROM conversation_events WHERE session_id LIKE 'seed-sess-%'").run();
+  db.prepare("DELETE FROM quotes WHERE id LIKE 'qt-seed-%'").run();
+
   const day = 86_400_000;
   const now = Date.now();
-  const samples: Array<[string, number, number, boolean, string | null]> = [
-    // [customer, daysAgo, totalCents, autoSent, escalationReason]
-    ['Mrs. Nair', 6.5, 30_000, true, null],
-    ['Mr. Kumar', 6.1, 14_000, true, null],
-    ['Ms. Chen', 5.8, 8_000, true, null],
-    ['Walk-in (Yishun)', 5.2, 12_000, true, null],
-    ['Mr. Rahman', 4.9, 12_000, true, null],
-    ['Mdm. Siti', 4.4, 8_000, true, null],
-    ['Walk-in (Hougang)', 3.8, 16_000, true, null],
-    ['Mr. Ong', 3.3, 18_000, true, null],
-    ['Walk-in (Sengkang)', 2.9, 24_000, false, 'discount_exceeds_limit'],
-    ['Mrs. Lim', 2.2, 24_000, true, null],
-    ['Walk-in (CBD office)', 1.8, 130_000, false, 'total_exceeds_limit'],
-    ['Mr. Goh', 1.3, 12_000, true, null],
-    ['Ms. Wong', 0.8, 7_000, true, null],
-    ['Walk-in (Katong)', 0.4, 9_500, true, null],
+  interface Sample {
+    customer: string;
+    daysAgo: number;
+    service: string;
+    ref: string | null;
+    qty: number;
+    unitCents: number;
+    auto: boolean;
+    reason: string | null;
+    inquiry: string;
+    scoping?: [string, string]; // [agent question, customer answer]
+    discountPct?: number;
+  }
+  const samples: Sample[] = [
+    { customer: 'Mrs. Nair', daysAgo: 6.5, service: 'Chemical overhaul — wall-mounted unit', ref: 'RC-05', qty: 2, unitCents: 15000, auto: true, reason: null,
+      inquiry: 'Hi, two of my units are blowing weak air even after servicing. I think they need the full treatment.',
+      scoping: ['Happy to help, Mrs. Nair! Are these the wall-mounted units in the living room? A chemical overhaul would restore them properly.', 'Yes, the two living room ones. Go ahead with the overhaul.'] },
+    { customer: 'Mr. Kumar', daysAgo: 6.1, service: 'General service — wall-mounted unit', ref: 'RC-01', qty: 4, unitCents: 3500, auto: true, reason: null,
+      inquiry: 'Time for our quarterly servicing — all 4 office units please. Same as last time.' },
+    { customer: 'Ms. Chen', daysAgo: 5.8, service: 'General service — wall-mounted unit', ref: 'RC-01', qty: 2, unitCents: 4000, auto: true, reason: null,
+      inquiry: 'Hello! Can I book a general service for my 2 bedroom units this weekend?' },
+    { customer: 'Walk-in (Yishun)', daysAgo: 5.2, service: 'Chemical wash — wall-mounted unit', ref: 'RC-03', qty: 1, unitCents: 8000, auto: true, reason: null,
+      inquiry: 'My bedroom aircon smells musty when it starts up. What can be done?',
+      scoping: ['A musty smell usually means the unit needs a chemical wash. Is it a wall-mounted unit?', 'Yes wall mounted, just the one.'] },
+    { customer: 'Mr. Rahman', daysAgo: 4.9, service: 'Gas top-up R32/R410A (per unit, up to 1000g)', ref: 'RC-06', qty: 1, unitCents: 8000, auto: true, reason: null,
+      inquiry: 'The aircon is blowing warm air again. Probably gas right? Can someone come this week?' },
+    { customer: 'Mdm. Siti', daysAgo: 4.4, service: 'Compressor inspection (outdoor unit)', ref: 'RC-08', qty: 1, unitCents: 9000, auto: true, reason: null,
+      inquiry: 'You all mentioned last time the living room unit was rattling — can I get that inspection done now?' },
+    { customer: 'Walk-in (Hougang)', daysAgo: 3.8, service: 'General service — wall-mounted unit', ref: 'RC-01', qty: 4, unitCents: 4000, auto: true, reason: null,
+      inquiry: 'Need servicing for 4 wall units at my flat. How much all in?' },
+    { customer: 'Mr. Ong', daysAgo: 3.3, service: 'Leak troubleshooting & repair (per unit)', ref: 'RC-07', qty: 1, unitCents: 10000, auto: true, reason: null,
+      inquiry: 'The cassette above the pantry is dripping again. Can you send someone? Landlord needs 1 day notice as usual.',
+      scoping: ['Of course, Mr. Ong — same unit as June? We will arrange access with the landlord.', 'Yes same one. Please arrange.'] },
+    { customer: 'Walk-in (Sengkang)', daysAgo: 2.9, service: 'Chemical wash — wall-mounted unit', ref: 'RC-03', qty: 3, unitCents: 8000, auto: false, reason: 'discount_exceeds_limit', discountPct: 20,
+      inquiry: 'Chemical wash for 3 units — but I saw a competitor doing 20% off. Match it and I will book today.',
+      scoping: ['We can definitely do 3 wall-mounted units. Let me check on that discount with the boss — one moment!', 'ok'] },
+    { customer: 'Mrs. Lim', daysAgo: 2.2, service: 'Chemical wash — ceiling cassette', ref: 'RC-04', qty: 2, unitCents: 12000, auto: true, reason: null,
+      inquiry: 'Hi, the two cassettes are due for their wash. Low-odour treatment please, and mind the corgi!' },
+    { customer: 'Walk-in (CBD office)', daysAgo: 1.8, service: 'VRV system inspection & servicing (commercial)', ref: null, qty: 1, unitCents: 130000, auto: false, reason: 'total_exceeds_limit',
+      inquiry: 'We have a VRV system for our office floor that needs servicing. Can you handle commercial systems?',
+      scoping: ['We do take commercial work case by case — VRV needs the boss to look at it. Let me check and come back with a proper quote.', 'Sure, please do.'] },
+    { customer: 'Mr. Goh', daysAgo: 1.3, service: 'Gas top-up + general service (combined visit)', ref: 'RC-06', qty: 1, unitCents: 12000, auto: true, reason: null,
+      inquiry: 'Hi, this is Karen — booking for my dad Mr. Goh again. Same unit needs the usual top-up and service.' },
+    { customer: 'Ms. Wong', daysAgo: 0.8, service: 'General service — wall-mounted unit', ref: 'RC-01', qty: 2, unitCents: 3500, auto: true, reason: null,
+      inquiry: 'First servicing for the units you installed in May please! Still under warranty right?' },
+    { customer: 'Walk-in (Katong)', daysAgo: 0.4, service: 'General service — wall-mounted unit + filter deep-clean', ref: 'RC-01', qty: 2, unitCents: 4750, auto: true, reason: null,
+      inquiry: 'Two units acting up — weak airflow and one keeps dripping a bit. Can someone take a look tomorrow?',
+      scoping: ['We can! Are both wall-mounted units? A general service with a filter deep-clean usually sorts both issues.', 'Yes both wall mounted, tomorrow afternoon works.'] },
   ];
+
   let n = 0;
-  for (const [customer, daysAgo, total, auto, reason] of samples) {
-    const createdAt = new Date(now - daysAgo * day).toISOString();
+  for (const sm of samples) {
+    const t0 = now - sm.daysAgo * day;
     const sessionId = `seed-sess-${n}`;
+    const at = (offsetSec: number) => new Date(t0 + offsetSec * 1000).toISOString();
+    const total = Math.round(sm.qty * sm.unitCents * (1 - (sm.discountPct ?? 0) / 100));
+
     const quote: QuoteRecord = {
       id: `qt-seed-${n}`,
       sessionId,
-      customerName: customer,
-      status: auto ? 'auto_sent' : reason === 'total_exceeds_limit' ? 'approved' : 'rejected',
+      customerName: sm.customer,
+      status: sm.auto ? 'auto_sent' : sm.reason === 'total_exceeds_limit' ? 'approved' : 'rejected',
       lineItems: [
-        { description: 'General service — wall-mounted unit', qty: Math.max(1, Math.round(total / 4000)), unitPriceCents: 4000, rateCardRef: 'RC-01' },
+        { description: sm.service, qty: sm.qty, unitPriceCents: sm.unitCents, ...(sm.ref ? { rateCardRef: sm.ref } : {}) },
       ],
-      discountPct: reason === 'discount_exceeds_limit' ? 20 : null,
+      discountPct: sm.discountPct ?? null,
       totalCents: total,
       currency: 'SGD',
-      escalationReason: (reason as QuoteRecord['escalationReason']) ?? null,
-      escalationDetails: reason ? 'Backfilled demo history' : null,
+      escalationReason: (sm.reason as QuoteRecord['escalationReason']) ?? null,
+      escalationDetails: sm.reason === 'discount_exceeds_limit'
+        ? `${sm.discountPct}% discount requested — house limit for auto-send is 10%`
+        : sm.reason === 'total_exceeds_limit'
+          ? 'Quote total SGD 1,300.00 exceeds the SGD 1,000.00 auto-send limit'
+          : null,
       confidence: null,
       notes: null,
       pdfFile: null,
-      createdAt,
+      createdAt: at(sm.scoping ? 210 : 45),
     };
     insertQuote(quote);
-    insertConvEvent(sessionId, 'msg_in', 'customer', { text: `(history) inquiry from ${customer}` }, createdAt);
-    insertConvEvent(
-      sessionId,
-      'msg_out',
-      'agent',
-      { text: `(history) quote sent to ${customer}` },
-      new Date(new Date(createdAt).getTime() + (15 + Math.round(Math.random() * 40)) * 1000).toISOString(),
-    );
-    insertConvEvent(sessionId, 'quote', 'agent', quote, createdAt);
+
+    let t = 0;
+    insertConvEvent(sessionId, 'msg_in', 'customer', { text: sm.inquiry }, at(t));
+    t += 12 + Math.round(Math.random() * 15);
+    if (sm.scoping) {
+      insertConvEvent(sessionId, 'msg_out', 'agent', { text: sm.scoping[0] }, at(t));
+      t += 60 + Math.round(Math.random() * 90);
+      insertConvEvent(sessionId, 'msg_in', 'customer', { text: sm.scoping[1] }, at(t));
+      t += 10 + Math.round(Math.random() * 20);
+    }
+    insertConvEvent(sessionId, 'reasoning', 'system', {
+      ts: at(t),
+      type: 'rule',
+      summary: sm.auto ? 'Quote within house rules — auto-sending' : 'Escalating to owner',
+      detail: quote.escalationDetails ?? 'All items on rate card, within house limits',
+    }, at(t));
+    t += 2;
+    if (sm.auto) {
+      insertConvEvent(sessionId, 'msg_out', 'agent', {
+        text: `📋 Quote from CoolBreeze Aircon Services\n\n• ${sm.service} — ${sm.qty} × SGD ${(sm.unitCents / 100).toFixed(2)}\n\nTotal: SGD ${(total / 100).toFixed(2)}\n\nValid for 14 days. Reply here to confirm a booking!`,
+        quote,
+      }, at(t));
+      insertConvEvent(sessionId, 'quote', 'agent', quote, at(t));
+    } else {
+      insertConvEvent(sessionId, 'msg_out', 'agent', {
+        text: 'Let me check with the boss on that — one moment! I will come back to you shortly.',
+        quotePending: { quoteId: quote.id, reason: quote.escalationReason },
+      }, at(t));
+      insertConvEvent(sessionId, 'quote', 'agent', quote, at(t));
+      insertConvEvent(sessionId, 'approval', 'system', { state: 'requested', quoteId: quote.id, why: quote.escalationDetails }, at(t + 1));
+      t += 600 + Math.round(Math.random() * 1200);
+      if (quote.status === 'approved') {
+        insertConvEvent(sessionId, 'approval', 'owner', { state: 'approved', quoteId: quote.id, by: 'telegram:owner' }, at(t));
+        insertConvEvent(sessionId, 'msg_out', 'agent', {
+          text: `Good news — the boss approved! 🎉\n\n📋 Your quote:\n\n• ${sm.service} — ${sm.qty} × SGD ${(sm.unitCents / 100).toFixed(2)}\n\nTotal: SGD ${(total / 100).toFixed(2)}\n\nValid for 14 days. Reply here to confirm a booking!`,
+          quote: { ...quote, status: 'approved' },
+        }, at(t + 2));
+      } else {
+        insertConvEvent(sessionId, 'approval', 'owner', { state: 'rejected', quoteId: quote.id, by: 'telegram:owner' }, at(t));
+        insertConvEvent(sessionId, 'msg_out', 'agent', {
+          text: 'Thanks for waiting! We cannot match 20% off, but the boss can do our best bundle rate — 10% off for 3 units. Shall I lock that in?',
+        }, at(t + 2));
+      }
+    }
     n++;
   }
-  console.log(`✓ Backfilled ${n} quotes + events across the past week`);
+  console.log(`✓ Backfilled ${n} realistic conversations + quotes across the past week`);
 }
 
 /* ── mount allowlist ── */
@@ -454,9 +534,7 @@ async function main(): Promise<void> {
   console.log('✓ web:demo-owner seeded (admin scoped to CoolBreeze)');
 
   // 4. Backfill history (skip if already present)
-  const existing = db.prepare("SELECT COUNT(*) AS c FROM quotes WHERE id LIKE 'qt-seed-%'").get() as { c: number };
-  if (existing.c === 0) backfillQuotes();
-  else console.log(`✓ Backfill already present (${existing.c} quotes)`);
+  backfillQuotes(db); // always regenerates seed conversations (idempotent by replacement)
 
   // 5. Demo token
   const envPath = path.resolve('.env');
