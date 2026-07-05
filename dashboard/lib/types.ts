@@ -66,6 +66,8 @@ export interface MsgOutPayload {
   quotePending?: { quoteId?: string; reason?: string };
   files?: FileRef[];
   askQuestion?: unknown;
+  /** True when a human owner barged in — rendered distinctly from agent replies. */
+  fromOwner?: boolean;
 }
 
 export interface MsgInPayload {

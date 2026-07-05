@@ -161,4 +161,9 @@ export const api = {
   timewarp(sessionId: string): Promise<{ ok: boolean; warped: number }> {
     return post<{ ok: boolean; warped: number }>("/timewarp", { sessionId });
   },
+
+  /** Owner barge-in reply into a live conversation. 409 = session no longer active. */
+  ownerReply(sessionId: string, text: string): Promise<{ ok: boolean }> {
+    return post<{ ok: boolean }>("/reply", { sessionId, text });
+  },
 };

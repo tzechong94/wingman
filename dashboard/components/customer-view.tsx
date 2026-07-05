@@ -28,6 +28,7 @@ import {
   RotateCcwIcon,
   SendIcon,
   SnowflakeIcon,
+  UserIcon,
   XIcon,
 } from "./icons";
 import { QuoteCard } from "./quote-card";
@@ -569,6 +570,7 @@ function EventBubble({
 
   // msg_out
   const p = event.payload as MsgOutPayload;
+  const fromOwner = p.fromOwner === true;
   const quote = normalizeQuote(p.quote);
   const pendingQuoteId = p.quotePending?.quoteId;
   const stillPending =
@@ -579,10 +581,25 @@ function EventBubble({
   return (
     <div className="flex items-end gap-2">
       <div className="mb-4 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
-        <SnowflakeIcon className="size-3.5" />
+        {fromOwner ? (
+          <UserIcon className="size-3.5" />
+        ) : (
+          <SnowflakeIcon className="size-3.5" />
+        )}
       </div>
       <div className="max-w-[80%] min-w-0">
-        <div className="space-y-2 rounded-2xl rounded-bl-md border border-line bg-panel px-3.5 py-2.5">
+        {fromOwner && (
+          <p className="mb-0.5 flex items-center gap-1 text-[10px] font-medium text-accent-strong">
+            Owner · CoolBreeze
+          </p>
+        )}
+        <div
+          className={
+            fromOwner
+              ? "space-y-2 rounded-2xl rounded-bl-md border border-accent/30 bg-panel px-3.5 py-2.5"
+              : "space-y-2 rounded-2xl rounded-bl-md border border-line bg-panel px-3.5 py-2.5"
+          }
+        >
           {text && (
             <p className="text-sm whitespace-pre-wrap text-ink">{text}</p>
           )}

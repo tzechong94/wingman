@@ -17,7 +17,7 @@ import path from 'path';
 
 import { wakeContainer } from '../../container-runner.js';
 import { getAgentGroupByFolder } from '../../db/agent-groups.js';
-import { createMessagingGroup } from '../../db/messaging-groups.js';
+import { createMessagingGroup, getMessagingGroup } from '../../db/messaging-groups.js';
 import { getWebVisitor, setWebVisitorSession, upsertWebVisitor } from '../../db/quotes.js';
 import { createMessagingGroupAgent } from '../../db/messaging-groups.js';
 import { log } from '../../log.js';
@@ -94,12 +94,13 @@ class WebAdapter implements ChannelAdapter {
 
     const payload: Record<string, unknown> = {
       text: typeof content.text === 'string' ? content.text : '',
+      ...(content.fromOwner ? { fromOwner: true } : {}),
       ...(content.quote ? { quote: content.quote } : {}),
       ...(content.quotePending ? { quotePending: content.quotePending } : {}),
       ...(content.type === 'ask_question' ? { askQuestion: content } : {}),
       ...(files.length ? { files } : {}),
     };
-    recordConvEvent(sessionId, 'msg_out', 'agent', payload);
+    recordConvEvent(sessionId, 'msg_out', content.fromOwner ? 'owner' : 'agent', payload);
     return undefined;
   }
 }
@@ -212,6 +213,40 @@ export function inboundFromVisitor(
       ...(attachments?.length ? { attachmentCount: attachments.length } : {}),
     });
   }
+}
+
+/**
+ * Owner barge-in: deliver a human reply into a customer conversation.
+ * Delivered through the normal adapter path (mirrors into conversation_events
+ * with actor='owner'), and the AGENT is told the boss spoke — so it doesn't
+ * repeat or contradict the human on the next turn.
+ */
+export async function ownerReplyToSession(sessionId: string, text: string): Promise<void> {
+  const session = getSession(sessionId);
+  if (!session || session.status !== 'active') throw new Error('session not active');
+  const mg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+  if (!mg) throw new Error('session has no origin messaging group');
+
+  const { getDeliveryAdapter } = await import('../../delivery.js');
+  const adapter = getDeliveryAdapter();
+  if (!adapter) throw new Error('no delivery adapter');
+  await adapter.deliver(
+    mg.channel_type,
+    mg.platform_id,
+    null,
+    'chat',
+    JSON.stringify({ text, fromOwner: true }),
+    undefined,
+    mg.instance,
+  );
+
+  const { notifyAgent } = await import('../../modules/approvals/primitive.js');
+  notifyAgent(
+    session,
+    `The business owner personally replied to the customer in this conversation: "${text}". ` +
+      `Treat it as authoritative — do not repeat, rephrase, or contradict it. Only respond to what the customer says next.`,
+  );
+  log.info('Owner barge-in delivered', { sessionId, chars: text.length });
 }
 
 /** Dashboard approval resolution — same dispatch path as a Telegram button tap. */

@@ -49,6 +49,7 @@ import {
   currentSessionOf,
   inboundFromVisitor,
   mintVisitor,
+  ownerReplyToSession,
   resetVisitor,
   resolveApprovalFromDashboard,
 } from './adapter.js';
@@ -385,6 +386,32 @@ async function handle(req: Req, res: Res): Promise<void> {
           return;
         }
         json(res, 200, result);
+        return;
+      }
+
+      case 'POST reply': {
+        if (!isOwner(req)) {
+          json(res, 403, { error: 'Owner only.' });
+          return;
+        }
+        const body = await readJson(req, res);
+        if (!body) return;
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+        const text = typeof body.text === 'string' ? body.text.trim() : '';
+        if (!sessionId || !text) {
+          json(res, 400, { error: 'sessionId and text are required.' });
+          return;
+        }
+        if (text.length > 2000) {
+          json(res, 400, { error: 'Reply too long (2000 chars max).' });
+          return;
+        }
+        try {
+          await ownerReplyToSession(sessionId, text);
+          json(res, 202, { ok: true });
+        } catch (err) {
+          json(res, 409, { error: err instanceof Error ? err.message : 'Could not deliver reply.' });
+        }
         return;
       }
 

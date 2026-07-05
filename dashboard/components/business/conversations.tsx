@@ -1,6 +1,6 @@
 "use client";
 
-import { api, isAuthError } from "@/lib/api";
+import { api, ApiError, isAuthError } from "@/lib/api";
 import { clockTime, shortId, timeAgo } from "@/lib/format";
 import { useToast } from "@/lib/toast";
 import { useFetch } from "@/lib/use-fetch";
@@ -11,8 +11,8 @@ import type {
   MsgOutPayload,
   ReasoningPayload,
 } from "@/lib/types";
-import { useState } from "react";
-import { MessageSquareIcon, ZapIcon } from "../icons";
+import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { MessageSquareIcon, SendIcon, UserIcon, ZapIcon } from "../icons";
 import { Button, CenteredState, Modal, Spinner, StatusChip } from "../ui";
 
 export function ConversationsTab({
@@ -98,6 +98,12 @@ export function ConversationsTab({
   );
 }
 
+interface OwnerEcho {
+  key: number;
+  text: string;
+  ts: number;
+}
+
 function TranscriptModal({
   conversation,
   onClose,
@@ -109,9 +115,75 @@ function TranscriptModal({
 }) {
   const { toast } = useToast();
   const [warping, setWarping] = useState(false);
-  const { data, loading, error, reload } = useFetch(() =>
+  const { data, loading, error, reload, mutate } = useFetch(() =>
     api.transcript({ sessionId: conversation.sessionId }),
   );
+
+  // --- owner barge-in composer ----------------------------------------------
+  const [reply, setReply] = useState("");
+  const [replySending, setReplySending] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [echoes, setEchoes] = useState<OwnerEcho[]>([]);
+  const echoKeyRef = useRef(1);
+  const replyInputRef = useRef<HTMLInputElement>(null);
+
+  // Hide an optimistic echo once the real msg_out event lands in the transcript.
+  const visibleEchoes = useMemo(() => {
+    if (!data) return echoes;
+    return echoes.filter(
+      (echo) =>
+        !data.some((e) => {
+          if (e.type !== "msg_out") return false;
+          const p = e.payload as MsgOutPayload;
+          return p.fromOwner === true && p.text === echo.text;
+        }),
+    );
+  }, [data, echoes]);
+
+  const sendReply = async () => {
+    const text = reply.trim();
+    if (!text || replySending) return;
+
+    const echo: OwnerEcho = { key: echoKeyRef.current++, text, ts: Date.now() };
+    setReplySending(true);
+    setReplyError(null);
+    setEchoes((prev) => [...prev, echo]);
+    setReply("");
+
+    try {
+      await api.ownerReply(conversation.sessionId, text);
+      // Silent refetch — the backend records the owner message asynchronously,
+      // so the echo stays visible until the real event shows up.
+      try {
+        const events = await api.transcript({ sessionId: conversation.sessionId });
+        mutate(() => events);
+      } catch {
+        // Refetch is best-effort; the optimistic echo keeps the reply visible.
+      }
+    } catch (err) {
+      setEchoes((prev) => prev.filter((e) => e.key !== echo.key));
+      setReply(text);
+      if (isAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setReplyError(
+        err instanceof ApiError && err.message
+          ? err.message
+          : "Couldn't send that reply — try again.",
+      );
+    } finally {
+      setReplySending(false);
+      replyInputRef.current?.focus();
+    }
+  };
+
+  const onReplyKey = (ev: KeyboardEvent<HTMLInputElement>) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      void sendReply();
+    }
+  };
 
   const timewarp = async () => {
     setWarping(true);
@@ -162,12 +234,80 @@ function TranscriptModal({
             }
           />
         )}
-        {!loading && data && data.length === 0 && (
+        {!loading && data && data.length === 0 && visibleEchoes.length === 0 && (
           <CenteredState title="Empty conversation" />
         )}
         {data?.map((e) => <TranscriptRow key={e.id} event={e} />)}
+        {visibleEchoes.map((echo) => (
+          <OwnerBubble
+            key={`echo-${echo.key}`}
+            text={echo.text}
+            ts={echo.ts}
+            pending
+          />
+        ))}
+      </div>
+
+      {/* owner barge-in composer, pinned to the bottom of the modal */}
+      <div className="sticky bottom-0 border-t border-line bg-panel px-4 py-3">
+        {replyError && (
+          <p className="mb-2 text-xs text-critical" role="alert">
+            {replyError}
+          </p>
+        )}
+        <div className="flex items-center gap-2">
+          <input
+            ref={replyInputRef}
+            type="text"
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            onKeyDown={onReplyKey}
+            disabled={replySending}
+            placeholder="Reply as owner…"
+            aria-label="Reply as owner"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 text-sm text-ink placeholder:text-faint disabled:opacity-60"
+          />
+          <Button
+            variant="primary"
+            size="md"
+            loading={replySending}
+            disabled={!reply.trim()}
+            onClick={() => void sendReply()}
+          >
+            {!replySending && <SendIcon className="size-3.5" />}
+            Send
+          </Button>
+        </div>
+        <p className="mt-1.5 text-[10px] text-faint">
+          Sends to the customer as you — the agent sees it too.
+        </p>
       </div>
     </Modal>
+  );
+}
+
+function OwnerBubble({
+  text,
+  ts,
+  pending = false,
+}: {
+  text: string;
+  ts: number;
+  pending?: boolean;
+}) {
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[75%] rounded-xl rounded-bl-sm border border-accent/40 bg-accent-soft/60 px-3 py-1.5 text-sm whitespace-pre-wrap text-ink">
+        <span className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold tracking-wide text-accent-strong uppercase">
+          <UserIcon className="size-3" />
+          Owner
+        </span>
+        {text}
+        <span className="mt-0.5 block text-[10px] text-faint tabular-nums">
+          {pending ? "Sending…" : clockTime(ts)}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -190,6 +330,9 @@ function TranscriptRow({ event }: { event: ConvEvent }) {
     const p = event.payload as MsgOutPayload;
     const text =
       p.text || (typeof p.askQuestion === "string" ? p.askQuestion : "") || "(quote)";
+    if (p.fromOwner === true) {
+      return <OwnerBubble text={text} ts={event.ts} />;
+    }
     return (
       <div className="flex justify-start">
         <div className="max-w-[75%] rounded-xl rounded-bl-sm border border-line bg-panel-2/60 px-3 py-1.5 text-sm whitespace-pre-wrap text-ink">
