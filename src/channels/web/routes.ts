@@ -235,6 +235,17 @@ async function handle(req: Req, res: Res): Promise<void> {
           }
         }
         const count = bumpWebVisitorMessages(vid);
+        if (count === 1 && text) {
+          // First message of a new web conversation → owner heads-up.
+          const session = currentSessionOf(vid);
+          if (session) {
+            const { notifyOwnerFyi } = await import('../../modules/quotes/actions.js');
+            void notifyOwnerFyi(
+              session,
+              `\u{1F4AC} New web inquiry (chat #${session.id.slice(-6)})\n\u201c${text.slice(0, 240)}\u201d\n\nWingman is handling it \u2014 you'll hear from me if it needs you.`,
+            );
+          }
+        }
         if (count > VISITOR_MSG_CAP) {
           json(res, 429, {
             error: `Demo limit reached (${VISITOR_MSG_CAP} messages). Use Reset demo to start a fresh conversation.`,

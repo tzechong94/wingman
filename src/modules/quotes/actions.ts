@@ -52,6 +52,65 @@ export async function handlePersistQuote(
   insertQuote(quote);
   recordConvEvent(session.id, 'quote', 'agent', quote, quote.createdAt);
   log.info('Quote persisted', { quoteId: quote.id, status: quote.status, totalCents: quote.totalCents });
+  const asked = lastCustomerMessage(session.id);
+  void notifyOwnerFyi(
+    session,
+    `\u2705 Quote auto-sent \u2014 ${fmtCents(quote.totalCents, quote.currency)}\n` +
+      `Customer: ${quote.customerName ?? 'unnamed web visitor'} (chat #${session.id.slice(-6)})\n` +
+      (asked ? `They asked: \u201c${asked}\u201d\n\n` : '\n') +
+      quote.lineItems
+        .map((li) => `\u2022 ${li.description} \u00d7${li.qty} @ ${fmtCents(li.unitPriceCents, quote.currency)}`)
+        .join('\n') +
+      (quote.discountPct ? `\nDiscount applied: ${quote.discountPct}%` : '') +
+      `\nTotal: ${fmtCents(quote.totalCents, quote.currency)}\n\n` +
+      `Within house rules \u2014 no action needed. Full thread in the cockpit.`,
+  );
+}
+
+/** Most recent customer message in a conversation (for owner notifications). */
+function lastCustomerMessage(sessionId: string): string | null {
+  const events = getConvEvents(sessionId, 0, 500);
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === 'msg_in') {
+      try {
+        const p = JSON.parse(events[i].payload) as { text?: string };
+        if (p.text) return p.text.slice(0, 200);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Fire-and-forget owner FYI on the owner's DM channel (Telegram) — for
+ * events that DON'T need approval but the boss wants to see. Disabled with
+ * WINGMAN_OWNER_NOTIFY=false. Never blocks the pipeline.
+ */
+export async function notifyOwnerFyi(session: Session, text: string): Promise<void> {
+  if ((process.env.WINGMAN_OWNER_NOTIFY || 'true').toLowerCase() === 'false') return;
+  try {
+    const { pickApprover, pickApprovalDelivery } = await import('../approvals/primitive.js');
+    const { getDeliveryAdapter } = await import('../../delivery.js');
+    const approvers = pickApprover(session.agent_group_id).filter((id) => !id.startsWith('web:'));
+    const target = await pickApprovalDelivery(approvers, 'telegram');
+    const adapter = getDeliveryAdapter();
+    if (!target || !adapter) return;
+    await adapter.deliver(
+      target.messagingGroup.channel_type,
+      target.messagingGroup.platform_id,
+      null,
+      'chat',
+      JSON.stringify({ text }),
+      undefined,
+      target.messagingGroup.instance,
+    );
+    log.info('Owner FYI sent', { to: target.userId, chars: text.length });
+    // eslint-disable-next-line no-catch-all/no-catch-all -- FYI notification is best-effort; the quote pipeline must never depend on Telegram being up
+  } catch (err) {
+    log.warn('Owner FYI notification failed', { err });
+  }
 }
 
 export async function handleReasoningEvent(
@@ -79,7 +138,10 @@ export async function handleRequestQuoteApproval(
     why,
   });
 
-  const items = quote.lineItems.map((li) => `• ${li.description} ×${li.qty}`).join('\n');
+  const items = quote.lineItems
+    .map((li) => `• ${li.description} ×${li.qty} @ ${fmtCents(li.unitPriceCents, quote.currency)}`)
+    .join('\n');
+  const asked = lastCustomerMessage(session.id);
   try {
     await requestApproval({
       session,
@@ -88,7 +150,8 @@ export async function handleRequestQuoteApproval(
       payload: { quote: quote as unknown, why },
       title: `Quote needs you — ${fmtCents(quote.totalCents, quote.currency)}`,
       question:
-        `${quote.customerName ? `Customer: ${quote.customerName}\n` : ''}` +
+        `Customer: ${quote.customerName ?? 'unnamed web visitor'} (chat #${session.id.slice(-6)})\n` +
+        (asked ? `They said: “${asked}”\n\n` : '') +
         `${items}\n` +
         `${quote.discountPct ? `Discount asked: ${quote.discountPct}%\n` : ''}` +
         `Total: ${fmtCents(quote.totalCents, quote.currency)}\n\n` +
