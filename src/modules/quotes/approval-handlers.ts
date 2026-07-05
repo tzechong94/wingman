@@ -18,6 +18,7 @@ import {
   type ApprovalHandlerContext,
 } from '../approvals/primitive.js';
 import { recordConvEvent } from './actions.js';
+import { rememberRejection } from './owner-instructions.js';
 import { fmtCents, type QuoteRecord } from './contracts.js';
 
 /** Resolve the customer-facing routing for a session's origin chat. */
@@ -42,7 +43,11 @@ async function deliverToCustomer(session: Session, content: Record<string, unkno
     undefined,
     routing.instance,
   );
-  recordConvEvent(session.id, 'msg_out', 'agent', content);
+  // The web adapter mirrors deliveries itself — recording here too produced
+  // duplicate bubbles. Only mirror for channels that don't self-mirror.
+  if (routing.channelType !== 'web') {
+    recordConvEvent(session.id, 'msg_out', 'agent', content);
+  }
 }
 
 function formatApprovedQuoteText(quote: QuoteRecord): string {
@@ -103,6 +108,9 @@ registerApprovalResolvedHandler(async ({ approval, session, outcome, userId }) =
     if (!quote) return;
     setQuoteStatus(quote.id, 'rejected');
     recordConvEvent(session.id, 'approval', 'owner', { state: 'rejected', quoteId: quote.id, by: userId });
+    // The owner's next free-text message (Telegram DM or dashboard note)
+    // becomes a binding instruction for this rejection.
+    rememberRejection(userId, session.id, quote.id);
     try {
       await deliverToCustomer(session, {
         text: `Thanks for waiting! We can't do that exact arrangement, but let me put together our best alternative for you — one moment.`,
@@ -113,8 +121,8 @@ registerApprovalResolvedHandler(async ({ approval, session, outcome, userId }) =
     notifyAgent(
       session,
       `Owner REJECTED quote ${quote.id}${quote.discountPct ? ` (${quote.discountPct}% discount asked)` : ''}. ` +
-        `Re-draft the quote strictly within house rules (check /workspace/agent/house-rules.json for the discount limit) ` +
-        `and emit a fresh QUOTE_JSON block.`,
+        `The customer's original ask is DECLINED — never re-submit it. Unless the owner sends a follow-up ` +
+        `instruction with different terms, re-offer at the house-rules limit.`,
     );
   } else if (approval.action === 'send_nudge') {
     const payload = JSON.parse(approval.payload || '{}') as { quoteId?: string };

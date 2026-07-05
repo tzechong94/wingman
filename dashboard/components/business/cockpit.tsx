@@ -24,6 +24,7 @@ import {
   ActivityIcon,
   AlertCircleIcon,
   BrainIcon,
+  ClipboardCheckIcon,
   FileTextIcon,
   LoaderIcon,
   LockIcon,
@@ -35,9 +36,10 @@ import { ChatPane, ChatPaneEmpty } from "./chat-pane";
 import { ContextPanel, ContextPanelEmpty } from "./context-panel";
 import { MemoryTab } from "./memory-tab";
 import { QuotesTab } from "./quotes-tab";
+import { SetupTab } from "./setup-tab";
 
 type AuthPhase = "checking" | "need_token" | "authed" | "error";
-type Overlay = "activity" | "quotes" | "memory" | null;
+type Overlay = "activity" | "quotes" | "memory" | "setup" | null;
 
 const MAX_ACTIVITY_ITEMS = 200;
 
@@ -468,6 +470,12 @@ function Cockpit({
           >
             <BrainIcon className="size-4" />
           </TopBarButton>
+          <TopBarButton
+            label="Business setup"
+            onClick={() => setOverlay("setup")}
+          >
+            <ClipboardCheckIcon className="size-4" />
+          </TopBarButton>
         </div>
       </div>
 
@@ -545,6 +553,11 @@ function Cockpit({
       {overlay === "memory" && (
         <Modal full title="Agent memory" onClose={() => setOverlay(null)}>
           <MemoryTab />
+        </Modal>
+      )}
+      {overlay === "setup" && (
+        <Modal full title="Business setup" onClose={() => setOverlay(null)}>
+          <SetupTab />
         </Modal>
       )}
     </div>

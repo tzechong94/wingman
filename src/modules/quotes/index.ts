@@ -20,6 +20,10 @@ import {
   handleRequestQuoteApproval,
 } from './actions.js';
 import './approval-handlers.js';
+import { setMessageInterceptor } from '../../router.js';
+import { ownerInstructionInterceptor } from './owner-instructions.js';
+
+setMessageInterceptor(ownerInstructionInterceptor);
 
 registerDeliveryAction('persist_quote', handlePersistQuote);
 registerDeliveryAction('reasoning_event', handleReasoningEvent);

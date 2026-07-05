@@ -125,6 +125,34 @@ export interface ConversationSummary {
 }
 
 // ---------------------------------------------------------------------------
+// Customer-side chat lists (GET /webhook/web/demo-chats + /my-chats)
+// ---------------------------------------------------------------------------
+
+/** A seeded demo conversation, browsable by anyone from the customer view. */
+export interface DemoChatSummary {
+  sessionId: string;
+  /** Known customer name (from their quotes), else null for walk-ins. */
+  customerName: string | null;
+  lastTs: number;
+  preview: string;
+}
+
+/** One of this browser's own conversations (visitor cookie scope). */
+export interface MyChatSummary {
+  sessionId: string;
+  status: "active" | "closed";
+  createdAt: number;
+  lastTs: number;
+  preview: string;
+}
+
+export interface MyChatsSnapshot {
+  chats: MyChatSummary[];
+  /** The session the composer currently talks to, if any. */
+  activeSessionId: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Engram memory (GET /webhook/web/memory)
 // ---------------------------------------------------------------------------
 
@@ -319,6 +347,35 @@ export function normalizeConversation(raw: unknown): ConversationSummary | null 
       Number(pick(r, "pendingApprovals", "pending_approvals") ?? 0) || 0,
     customerName:
       typeof customerName === "string" && customerName ? customerName : null,
+  };
+}
+
+export function normalizeDemoChat(raw: unknown): DemoChatSummary | null {
+  if (!isRecord(raw)) return null;
+  const r = raw;
+  const sessionId = String(pick(r, "sessionId", "session_id") ?? "");
+  if (!sessionId) return null;
+  const customerName = pick(r, "customerName", "customer_name");
+  return {
+    sessionId,
+    customerName:
+      typeof customerName === "string" && customerName ? customerName : null,
+    lastTs: toMillis(pick(r, "lastTs", "last_ts")),
+    preview: String(r.preview ?? ""),
+  };
+}
+
+export function normalizeMyChat(raw: unknown): MyChatSummary | null {
+  if (!isRecord(raw)) return null;
+  const r = raw;
+  const sessionId = String(pick(r, "sessionId", "session_id") ?? "");
+  if (!sessionId) return null;
+  return {
+    sessionId,
+    status: r.status === "active" ? "active" : "closed",
+    createdAt: toMillis(pick(r, "createdAt", "created_at")),
+    lastTs: toMillis(pick(r, "lastTs", "last_ts")),
+    preview: String(r.preview ?? ""),
   };
 }
 

@@ -11,6 +11,7 @@ import {
   type MsgInPayload,
   type MsgOutPayload,
 } from "@/lib/types";
+import { useFetch } from "@/lib/use-fetch";
 import {
   useCallback,
   useEffect,
@@ -19,20 +20,22 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
+import { CustomerRail, type CustomerSelection } from "./customer-rail";
 import {
   AlertCircleIcon,
+  ArrowLeftIcon,
   ClockIcon,
   LoaderIcon,
   PaperclipIcon,
-  RotateCcwIcon,
   SendIcon,
   SnowflakeIcon,
   UserIcon,
   XIcon,
 } from "./icons";
 import { QuoteCard } from "./quote-card";
-import { Button, CenteredState, Spinner } from "./ui";
+import { Button, CenteredState, cn, Spinner, StatusChip } from "./ui";
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const TYPING_TIMEOUT_MS = 90_000;
@@ -61,7 +64,144 @@ function mergeEvents(prev: ConvEvent[], incoming: ConvEvent[]): ConvEvent[] {
   return [...byId.values()].sort((a, b) => a.id - b.id);
 }
 
+/** Quote ids that have been resolved by a later approval/quote event. */
+function computeResolvedQuoteIds(events: ConvEvent[]): Set<string> {
+  const resolved = new Set<string>();
+  for (const e of events) {
+    if (e.type === "quote" || e.type === "approval" || e.type === "msg_out") {
+      const p = e.payload as MsgOutPayload;
+      // The pending bubble itself must not resolve its own chip.
+      if (e.type === "msg_out" && p.quotePending && !p.quote) continue;
+      for (const id of referencedQuoteIds(e)) resolved.add(id);
+    }
+  }
+  return resolved;
+}
+
+function filterVisible(events: ConvEvent[]): ConvEvent[] {
+  return events.filter(
+    (e) => e.type === "msg_in" || e.type === "msg_out" || e.type === "error",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator: left rail (chat list) + chat surface. Below 800px it becomes
+// list OR chat, WhatsApp-mobile style, with a back arrow in the chat header.
+// ---------------------------------------------------------------------------
+
 export function CustomerView() {
+  const { toast } = useToast();
+
+  const [selection, setSelection] = useState<CustomerSelection>({
+    kind: "live",
+  });
+  const [mobilePane, setMobilePane] = useState<"list" | "chat">("chat");
+  // Remount key for the live chat: bumping it after POST /session?new=1 makes
+  // the live pane re-bootstrap into the freshly minted session.
+  const [liveEpoch, setLiveEpoch] = useState(0);
+  const [creatingChat, setCreatingChat] = useState(false);
+
+  const myChats = useFetch(useCallback(() => api.myChats(), []));
+  const demoChats = useFetch(useCallback(() => api.demoChats(), []));
+  const reloadMyChats = myChats.reload;
+
+  const select = useCallback((next: CustomerSelection) => {
+    setSelection(next);
+    setMobilePane("chat");
+  }, []);
+
+  const startNewChat = useCallback(async () => {
+    if (creatingChat) return;
+    setCreatingChat(true);
+    try {
+      await api.createSession({ forceNew: true });
+      setLiveEpoch((n) => n + 1);
+      setSelection({ kind: "live" });
+      setMobilePane("chat");
+      reloadMyChats();
+      toast("Fresh conversation started.", "success");
+    } catch {
+      toast("Couldn't start a new chat — try again.", "error");
+    } finally {
+      setCreatingChat(false);
+    }
+  }, [creatingChat, reloadMyChats, toast]);
+
+  // The live chat's bootstrap may mint the visitor cookie + first session, so
+  // refresh the own-chats list once it settles.
+  const onLiveSessionReady = useCallback(() => {
+    reloadMyChats();
+  }, [reloadMyChats]);
+
+  const openList = useCallback(() => setMobilePane("list"), []);
+  const isLive = selection.kind === "live";
+
+  return (
+    <div className="flex h-full">
+      <div
+        className={cn(
+          "h-full w-full min-w-0 min-[800px]:w-64 min-[800px]:shrink-0",
+          mobilePane === "chat" && "hidden min-[800px]:block",
+        )}
+      >
+        <CustomerRail
+          myChats={myChats.data}
+          myChatsLoading={myChats.loading}
+          demoChats={demoChats.data}
+          demoChatsLoading={demoChats.loading}
+          demoChatsError={demoChats.error}
+          onReloadDemoChats={demoChats.reload}
+          selection={selection}
+          onSelect={select}
+          onNewChat={() => void startNewChat()}
+          creatingChat={creatingChat}
+        />
+      </div>
+
+      <div
+        className={cn(
+          "h-full min-w-0 flex-1",
+          mobilePane === "list" && "hidden min-[800px]:block",
+        )}
+      >
+        {/* The live chat stays mounted while a replay is open so SSE keeps
+            flowing and composer state survives browsing demo chats. */}
+        <div className={cn("h-full", !isLive && "hidden")}>
+          <LiveChat
+            key={liveEpoch}
+            visible={isLive && mobilePane === "chat"}
+            onOpenList={openList}
+            onSessionReady={onLiveSessionReady}
+          />
+        </div>
+        {selection.kind === "replay" && (
+          <ReplayChat
+            sessionId={selection.sessionId}
+            name={selection.name}
+            variant={selection.variant}
+            onOpenList={openList}
+            onStartNew={() => void startNewChat()}
+            startingNew={creatingChat}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live chat: this visitor's active conversation (composer, SSE, photos).
+// ---------------------------------------------------------------------------
+
+function LiveChat({
+  visible,
+  onOpenList,
+  onSessionReady,
+}: {
+  visible: boolean;
+  onOpenList: () => void;
+  onSessionReady: (sessionId: string) => void;
+}) {
   const { toast } = useToast();
 
   const [phase, setPhase] = useState<Phase>("loading");
@@ -73,7 +213,6 @@ export function CustomerView() {
   const [input, setInput] = useState("");
   const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
   const [sending, setSending] = useState(false);
-  const [resetting, setResetting] = useState(false);
 
   const sessionRef = useRef<string | null>(null);
   sessionRef.current = sessionId;
@@ -83,6 +222,8 @@ export function CustomerView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevSseState = useRef<SseState>("connecting");
+  const onSessionReadyRef = useRef(onSessionReady);
+  onSessionReadyRef.current = onSessionReady;
 
   const addEvents = useCallback((incoming: ConvEvent[]) => {
     const own = incoming.filter(
@@ -122,6 +263,7 @@ export function CustomerView() {
       const transcript = await api.transcript();
       addEvents(transcript);
       setPhase("ready");
+      onSessionReadyRef.current(session.sessionId);
     } catch {
       setPhase("error");
     }
@@ -161,33 +303,20 @@ export function CustomerView() {
     return () => clearTimeout(t);
   }, [awaitingSince]);
 
-  // Auto-scroll to the newest message.
+  // Auto-scroll to the newest message. `visible` is a dep so that returning
+  // from a replay (display:none while hidden) re-pins the bottom.
   useEffect(() => {
+    if (!visible) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events, echoes, awaitingSince, slowNote]);
+  }, [events, echoes, awaitingSince, slowNote, visible]);
 
-  // Quote ids that have been resolved by a later approval/quote event.
-  const resolvedQuoteIds = useMemo(() => {
-    const resolved = new Set<string>();
-    for (const e of events) {
-      if (e.type === "quote" || e.type === "approval" || e.type === "msg_out") {
-        const p = e.payload as MsgOutPayload;
-        // The pending bubble itself must not resolve its own chip.
-        if (e.type === "msg_out" && p.quotePending && !p.quote) continue;
-        for (const id of referencedQuoteIds(e)) resolved.add(id);
-      }
-    }
-    return resolved;
-  }, [events]);
-
-  const visibleEvents = useMemo(
-    () =>
-      events.filter(
-        (e) => e.type === "msg_in" || e.type === "msg_out" || e.type === "error",
-      ),
+  const resolvedQuoteIds = useMemo(
+    () => computeResolvedQuoteIds(events),
     [events],
   );
+
+  const visibleEvents = useMemo(() => filterVisible(events), [events]);
 
   const hasMessages = visibleEvents.length > 0 || echoes.length > 0;
 
@@ -274,26 +403,6 @@ export function CustomerView() {
     }
   };
 
-  const resetDemo = async () => {
-    if (resetting) return;
-    setResetting(true);
-    try {
-      const session = await api.reset();
-      sessionRef.current = session.sessionId;
-      setSessionId(session.sessionId);
-      setEvents([]);
-      setEchoes([]);
-      setAwaitingSince(null);
-      setSlowNote(false);
-      lastEventIdRef.current = 0;
-      toast("Fresh conversation started.", "success");
-    } catch {
-      toast("Couldn't reset the demo — try again.", "error");
-    } finally {
-      setResetting(false);
-    }
-  };
-
   const suggest = (text: string) => {
     setInput(text);
     inputRef.current?.focus();
@@ -303,7 +412,7 @@ export function CustomerView() {
 
   if (phase === "loading") {
     return (
-      <ChatFrame sseState={null}>
+      <ChatFrame sseState={null} onOpenList={onOpenList}>
         <div className="flex flex-1 items-center justify-center">
           <div className="flex items-center gap-2 text-sm text-muted">
             <Spinner className="size-4" /> Connecting you to CoolBreeze…
@@ -315,7 +424,7 @@ export function CustomerView() {
 
   if (phase === "error") {
     return (
-      <ChatFrame sseState={null}>
+      <ChatFrame sseState={null} onOpenList={onOpenList}>
         <div className="flex flex-1 items-center justify-center">
           <CenteredState
             icon={<AlertCircleIcon className="size-6" />}
@@ -333,7 +442,7 @@ export function CustomerView() {
   }
 
   return (
-    <ChatFrame sseState={sseState}>
+    <ChatFrame sseState={sseState} onOpenList={onOpenList}>
       {/* messages */}
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {!hasMessages && (
@@ -473,20 +582,114 @@ export function CustomerView() {
             )}
           </Button>
         </div>
-        <div className="mt-1.5 flex items-center justify-between">
-          <p className="text-[10px] text-faint">
-            Enter to send · Shift+Enter for a new line
-          </p>
-          <button
-            type="button"
-            onClick={() => void resetDemo()}
-            disabled={resetting}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-faint hover:text-muted disabled:opacity-60"
-          >
-            <RotateCcwIcon className="size-2.5" />
-            Reset demo
-          </button>
-        </div>
+        <p className="mt-1.5 text-[10px] text-faint">
+          Enter to send · Shift+Enter for a new line
+        </p>
+      </div>
+    </ChatFrame>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Read-only replay: a demo customer's chat, or one of your ended chats.
+// msg_in renders as the customer side — as if the viewer were that customer.
+// ---------------------------------------------------------------------------
+
+function ReplayChat({
+  sessionId,
+  name,
+  variant,
+  onOpenList,
+  onStartNew,
+  startingNew,
+}: {
+  sessionId: string;
+  name: string;
+  variant: "demo" | "closed";
+  onOpenList: () => void;
+  onStartNew: () => void;
+  startingNew: boolean;
+}) {
+  const { data, loading, error, reload } = useFetch(
+    useCallback(() => api.transcript({ sessionId }), [sessionId]),
+  );
+  const events = useMemo(() => data ?? [], [data]);
+
+  const resolvedQuoteIds = useMemo(
+    () => computeResolvedQuoteIds(events),
+    [events],
+  );
+  const visibleEvents = useMemo(() => filterVisible(events), [events]);
+
+  const badge = (
+    <StatusChip
+      tone="neutral"
+      label={variant === "demo" ? "Demo replay" : "Ended"}
+    />
+  );
+
+  return (
+    <ChatFrame sseState={null} onOpenList={onOpenList} badge={badge}>
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {loading && (
+          <div className="flex h-full items-center justify-center">
+            <div className="flex items-center gap-2 text-sm text-muted">
+              <Spinner className="size-4" /> Loading conversation…
+            </div>
+          </div>
+        )}
+
+        {Boolean(error) && !loading && (
+          <div className="flex h-full items-center justify-center">
+            <CenteredState
+              icon={<AlertCircleIcon className="size-6" />}
+              title="Couldn't load this conversation"
+              action={
+                <Button variant="secondary" onClick={reload}>
+                  Retry
+                </Button>
+              }
+            />
+          </div>
+        )}
+
+        {!loading && !error && visibleEvents.length === 0 && (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-muted">Nothing was said in this chat.</p>
+          </div>
+        )}
+
+        {!loading &&
+          visibleEvents.map((e) => (
+            <EventBubble
+              key={e.id}
+              event={e}
+              resolvedQuoteIds={resolvedQuoteIds}
+            />
+          ))}
+      </div>
+
+      {/* read-only footer instead of a composer */}
+      <div className="flex items-center justify-between gap-3 border-t border-line bg-panel px-4 py-3">
+        <p className="min-w-0 text-xs text-muted">
+          {variant === "demo" ? (
+            <>
+              Replaying <span className="font-medium text-ink">{name}</span>
+              &rsquo;s conversation — demo history
+            </>
+          ) : (
+            "This chat has ended"
+          )}
+        </p>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={onStartNew}
+          loading={startingNew}
+          className="shrink-0"
+        >
+          Start your own chat
+        </Button>
       </div>
     </ChatFrame>
   );
@@ -496,16 +699,31 @@ export function CustomerView() {
 
 function ChatFrame({
   sseState,
+  onOpenList,
+  badge,
   children,
 }: {
   sseState: SseState | null;
-  children: React.ReactNode;
+  /** Shown below 800px: back to the chat list (WhatsApp-mobile pattern). */
+  onOpenList?: () => void;
+  badge?: ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="mx-auto flex h-full w-full max-w-2xl flex-col px-4 py-4 sm:py-6">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-[0_2px_12px_rgb(22_48_43/0.06)]">
         {/* brand header */}
         <div className="flex items-center gap-3 border-b border-line bg-panel px-4 py-3">
+          {onOpenList && (
+            <button
+              type="button"
+              onClick={onOpenList}
+              aria-label="Back to chat list"
+              className="-ml-1 flex size-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-panel-2 hover:text-ink min-[800px]:hidden"
+            >
+              <ArrowLeftIcon className="size-4.5" />
+            </button>
+          )}
           <div className="flex size-9 items-center justify-center rounded-full bg-accent text-on-accent">
             <SnowflakeIcon className="size-4.5" />
           </div>
@@ -518,6 +736,7 @@ function ChatFrame({
               Typically replies in minutes
             </p>
           </div>
+          {badge}
           {sseState === "reconnecting" && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-muted">
               <LoaderIcon className="size-3 animate-spin" />

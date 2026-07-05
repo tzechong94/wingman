@@ -116,10 +116,12 @@ export function setSenderScopeGate(fn: SenderScopeGateFn): void {
  */
 export type MessageInterceptorFn = (event: InboundEvent) => Promise<boolean>;
 
-let messageInterceptor: MessageInterceptorFn | null = null;
+const messageInterceptors: MessageInterceptorFn[] = [];
 
+/** Registers an interceptor; multiple modules may register — they run in
+ *  registration order and the first to return true consumes the message. */
 export function setMessageInterceptor(fn: MessageInterceptorFn): void {
-  messageInterceptor = fn;
+  messageInterceptors.push(fn);
 }
 
 /**
@@ -158,7 +160,9 @@ function safeParseContent(raw: string): { text?: string; sender?: string; sender
 export async function routeInbound(event: InboundEvent): Promise<void> {
   // Pre-route interceptor — lets modules consume messages before any routing
   // (e.g. free-text replies during multi-step approval flows).
-  if (messageInterceptor && (await messageInterceptor(event))) return;
+  for (const interceptor of messageInterceptors) {
+    if (await interceptor(event)) return;
+  }
 
   // 0. Apply the adapter's thread policy. Non-threaded adapters (Telegram,
   //    WhatsApp, iMessage, email) collapse threads to the channel. Resolved

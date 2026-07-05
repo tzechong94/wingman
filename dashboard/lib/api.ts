@@ -1,14 +1,19 @@
 import {
   normalizeApproval,
   normalizeConversation,
+  normalizeDemoChat,
   normalizeMemory,
+  normalizeMyChat,
   normalizeQuote,
   parseConvEvent,
   type Analytics,
   type ApprovalItem,
   type ConvEvent,
   type ConversationSummary,
+  type DemoChatSummary,
   type MemorySnapshot,
+  type MyChatsSnapshot,
+  type MyChatSummary,
   type QuoteRecord,
 } from "./types";
 
@@ -86,14 +91,54 @@ export interface SessionInfo {
   sessionId: string;
 }
 
+/** The business's grounding documents, exactly as given to the agent. */
+export interface BusinessSetup {
+  folder: string;
+  provider: string;
+  files: {
+    persona: string | null;
+    rateCard: string | null;
+    houseRules: string | null;
+    customers: string | null;
+  };
+}
+
 export interface Attachment {
   mimeType: string;
   data: string;
 }
 
 export const api = {
-  createSession(): Promise<SessionInfo> {
-    return post<SessionInfo>("/session");
+  /**
+   * Bootstrap or reuse this browser's session. With `forceNew`, the backend
+   * closes the current chat and mints a fresh one for the same visitor.
+   */
+  createSession(opts?: { forceNew?: boolean }): Promise<SessionInfo> {
+    return post<SessionInfo>(opts?.forceNew ? "/session?new=1" : "/session");
+  },
+
+  /** Seeded demo conversations, public — browsed from the customer view. */
+  async demoChats(): Promise<DemoChatSummary[]> {
+    const res = await get<{ chats?: unknown[] }>("/demo-chats");
+    return (res.chats ?? [])
+      .map(normalizeDemoChat)
+      .filter((c): c is DemoChatSummary => c !== null);
+  },
+
+  /** This browser's own conversations (visitor cookie scope). */
+  async myChats(): Promise<MyChatsSnapshot> {
+    const res = await get<{ chats?: unknown[]; activeSessionId?: unknown }>(
+      "/my-chats",
+    );
+    return {
+      chats: (res.chats ?? [])
+        .map(normalizeMyChat)
+        .filter((c): c is MyChatSummary => c !== null),
+      activeSessionId:
+        typeof res.activeSessionId === "string" && res.activeSessionId
+          ? res.activeSessionId
+          : null,
+    };
   },
 
   sendMessage(text: string, attachments?: Attachment[]): Promise<{ ok: boolean }> {
@@ -149,13 +194,33 @@ export const api = {
       .filter((c): c is ConversationSummary => c !== null);
   },
 
+  async business(): Promise<BusinessSetup> {
+    const res = await get<unknown>("/business");
+    const obj =
+      res !== null && typeof res === "object"
+        ? (res as Record<string, unknown>)
+        : {};
+    const files =
+      obj.files !== null && typeof obj.files === "object"
+        ? (obj.files as Record<string, unknown>)
+        : {};
+    const str = (v: unknown): string | null =>
+      typeof v === "string" && v.trim().length > 0 ? v : null;
+    return {
+      folder: typeof obj.folder === "string" ? obj.folder : "",
+      provider: typeof obj.provider === "string" ? obj.provider : "",
+      files: {
+        persona: str(files.persona),
+        rateCard: str(files.rateCard),
+        houseRules: str(files.houseRules),
+        customers: str(files.customers),
+      },
+    };
+  },
+
   async memory(): Promise<MemorySnapshot> {
     const res = await get<unknown>("/memory");
     return normalizeMemory(res);
-  },
-
-  reset(): Promise<SessionInfo> {
-    return post<SessionInfo>("/reset");
   },
 
   timewarp(sessionId: string): Promise<{ ok: boolean; warped: number }> {

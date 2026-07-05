@@ -148,6 +148,11 @@ export async function pickApprovalDelivery(
   approvers: string[],
   originChannelType: string,
 ): Promise<{ userId: string; messagingGroup: MessagingGroup } | null> {
+  // Wingman: `web:` identities are synthetic (the dashboard demo-owner).
+  // They authorize dashboard clicks but have no real DM surface — cards
+  // "delivered" to them vanish into a visitor chat. Route past them to a
+  // human channel (Telegram).
+  approvers = approvers.filter((id) => !id.startsWith('web:'));
   if (originChannelType) {
     for (const userId of approvers) {
       if (channelTypeOf(userId) !== originChannelType) continue;

@@ -21,23 +21,30 @@ import { parseHouseRules, DEFAULT_HOUSE_RULES } from './rules.js';
 
 const EXTRACT_MODEL = process.env.QWEN_EXTRACT_MODEL || 'qwen-max';
 const EXTRACT_TIMEOUT_MS = 20_000;
-const TRANSCRIPT_ROWS = 14;
+const TRANSCRIPT_ROWS = 22;
 
 function log(msg: string): void {
   console.error(`[quote-extractor] ${msg}`);
 }
 
 /** Interleaved recent transcript — seq spans both session DBs, so a union sort works. */
-export function getRecentTranscript(limit = TRANSCRIPT_ROWS): Array<{ role: 'customer' | 'assistant'; text: string }> {
-  const rows: Array<{ seq: number; role: 'customer' | 'assistant'; text: string }> = [];
+export function getRecentTranscript(
+  limit = TRANSCRIPT_ROWS,
+): Array<{ role: 'customer' | 'assistant' | 'owner_system'; text: string }> {
+  const rows: Array<{ seq: number; role: 'customer' | 'assistant' | 'owner_system'; text: string }> = [];
   try {
     const ins = getInboundDb()
       .prepare("SELECT seq, content FROM messages_in WHERE kind IN ('chat','chat-sdk') ORDER BY seq DESC LIMIT ?")
       .all(limit) as Array<{ seq: number; content: string }>;
     for (const r of ins) {
       try {
-        const c = JSON.parse(r.content) as { text?: string };
-        if (c.text) rows.push({ seq: r.seq, role: 'customer', text: c.text });
+        const c = JSON.parse(r.content) as { text?: string; sender?: string; senderId?: string };
+        if (!c.text) continue;
+        // Host system notices (owner decisions, instructions) arrive on the
+        // inbound side with sender 'system' — labeling them CUSTOMER poisons
+        // quotability judgments ("Owner REJECTED…" is not a customer ask).
+        const isSystem = c.sender === 'system' || c.senderId === 'system';
+        rows.push({ seq: r.seq, role: isSystem ? 'owner_system' : 'customer', text: c.text });
       } catch {
         /* skip */
       }
@@ -150,8 +157,9 @@ export async function extractQuoteDecision(
   const rules = parseHouseRules(readWorkspaceFile('/workspace/agent/house-rules.json') || '{}');
 
   const convo =
-    transcript.map((t) => `${t.role === 'customer' ? 'CUSTOMER' : 'ASSISTANT'}: ${t.text}`).join('\n') +
-    (latestReply ? `\nASSISTANT (latest): ${latestReply}` : '');
+    transcript
+      .map((t) => `${t.role === 'customer' ? 'CUSTOMER' : t.role === 'owner_system' ? 'OWNER/SYSTEM' : 'ASSISTANT'}: ${t.text}`)
+      .join('\n') + (latestReply ? `\nASSISTANT (latest): ${latestReply}` : '');
 
   const sys =
     `You are the quoting engine for ${rules.businessName || DEFAULT_HOUSE_RULES.businessName}. ` +
@@ -167,6 +175,12 @@ export async function extractQuoteDecision(
     `customer's messages establish unit count, unit type (wall-mounted / ceiling cassette / window), and the needed service. ` +
     `IGNORE the assistant's own questions — assistants over-ask; a redundant assistant question never blocks a quote.\n` +
     `- When the customer chose a service in answer to a which-service question, quote ONLY the chosen service — do not also add diagnostic/repair items they did not pick.\n` +
+    `- OWNER/SYSTEM lines are the BUSINESS OWNER's decisions and outrank everything, INCLUDING every rule below. ` +
+    `An OWNER INSTRUCTION with terms (e.g. "max 20%") IS ITSELF A NEW REQUEST: quotable=true immediately, ` +
+    `re-quote the same items with EXACTLY the owner's terms (discountPct = the owner's stated max) — do NOT wait ` +
+    `for the customer to ask again, and "already quoted / no new request" does NOT apply. ` +
+    `Never re-submit a discount the owner rejected. If the owner rejected with NO instruction and the customer ` +
+    `hasn't spoken since, re-quote at the house-rules discount limit.\n` +
     `- quotable=false if a FORMAL QUOTE CARD was already sent AND the customer has asked nothing new since — formal cards begin with "📋 Quote from" or "Good news — the boss approved". ` +
     `A price merely mentioned in assistant prose is NOT a formal quote. BUT if the customer asks anything new AFTER the card ` +
     `(a discount, more units, a different service), that IS quotable again: re-quote the same items with the change applied ` +
