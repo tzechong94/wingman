@@ -152,12 +152,18 @@ const scenarios: Scenario[] = [
       const t1 = await say(ctx, 'I need a general service for 2 wall-mounted units please.');
       const c = cards(t1)[0];
       const files = outs(t1).find((e) => e.payload.files) as Ev | undefined;
+      // Real customers ask follow-ups: the answer must be helpful prose, no
+      // duplicate card, still no invented promises.
+      const t2 = await say(ctx, 'how long does the service take? and do i need to prepare anything?');
+      const followupReply = texts(t2);
       return [
         { name: 'quote card sent', pass: Boolean(c) },
         { name: 'correct price (2×RC-01 = SGD 80)', pass: c?.totalCents === 8000, note: String(c?.totalCents) },
         { name: 'auto_sent (within rules)', pass: c?.status === 'auto_sent' },
         { name: 'rate-card refs on items', pass: Array.isArray(c?.lineItems) && (c.lineItems as Array<{ rateCardRef?: string }>).every((li) => Boolean(li.rateCardRef)) },
         { name: 'PDF attached', pass: Boolean(files), note: files ? '' : 'renderer is best-effort' },
+        { name: 'answers follow-up question in prose', pass: followupReply.length > 20, note: followupReply.slice(0, 70) },
+        { name: 'no duplicate card on follow-up', pass: cards(t2).length === 0 },
       ];
     },
   },
@@ -306,6 +312,45 @@ const scenarios: Scenario[] = [
           pass: !c || (autoDiscount as number) <= 10,
           note: c ? `sent at ${autoDiscount}%` : approval ? 'escalated (also fine)' : 'no card (fine)',
         },
+      ];
+    },
+  },
+  {
+    id: 12,
+    title: 'Context continuity — quantity change updates the quote',
+    async run() {
+      const ctx = await newConversation();
+      const t1 = await say(ctx, 'General service for 2 wall-mounted units please.');
+      const t2 = await say(ctx, 'actually make it 3 units — forgot the study room');
+      const c1 = cards(t1)[0];
+      const c2 = cards(t2)[0];
+      const qty = Array.isArray(c2?.lineItems)
+        ? (c2.lineItems as Array<{ qty: number }>).reduce((s2, li) => s2 + li.qty, 0)
+        : 0;
+      return [
+        { name: 'first card at 2 units (SGD 80)', pass: c1?.totalCents === 8000, note: String(c1?.totalCents) },
+        { name: 'updated card sent on change', pass: Boolean(c2) },
+        { name: '3 units total', pass: qty === 3, note: String(qty) },
+        {
+          name: 'bundle rate applied (3×RC-01B = SGD 105)',
+          pass: c2?.totalCents === 10500,
+          note: String(c2?.totalCents),
+        },
+      ];
+    },
+  },
+  {
+    id: 13,
+    title: 'Graceful close — thanks gets a warm goodbye, not a quote or interrogation',
+    async run() {
+      const ctx = await newConversation();
+      await say(ctx, 'Chemical wash for 1 wall-mounted unit please.');
+      const t2 = await say(ctx, "great, that's all for now — thanks so much!");
+      const reply = texts(t2);
+      return [
+        { name: 'replied warmly', pass: reply.length > 5, note: reply.slice(0, 60) },
+        { name: 'no new card', pass: cards(t2).length === 0 },
+        { name: 'no price talk', pass: !mentionsPrice(reply) },
       ];
     },
   },
