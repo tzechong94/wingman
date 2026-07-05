@@ -127,6 +127,28 @@ export function CustomerView() {
     }
   }, [creatingChat, reloadMyChats, toast]);
 
+  // Continue an ended own-chat: same session reactivates (transcript +
+  // memory intact); the live pane remounts and boots into it.
+  const continueChat = useCallback(
+    async (sessionId: string) => {
+      if (creatingChat) return;
+      setCreatingChat(true);
+      try {
+        await api.activateChat(sessionId);
+        setLiveEpoch((n) => n + 1);
+        setSelection({ kind: "live" });
+        setMobilePane("chat");
+        reloadMyChats();
+        toast("Chat resumed — pick up where you left off.", "success");
+      } catch {
+        toast("Couldn't resume this chat — try again.", "error");
+      } finally {
+        setCreatingChat(false);
+      }
+    },
+    [creatingChat, reloadMyChats, toast],
+  );
+
   // The live chat's bootstrap may mint the visitor cookie + first session, so
   // refresh the own-chats list once it settles.
   const onLiveSessionReady = useCallback(() => {
@@ -181,6 +203,7 @@ export function CustomerView() {
             variant={selection.variant}
             onOpenList={openList}
             onStartNew={() => void startNewChat()}
+            onContinue={(id) => void continueChat(id)}
             startingNew={creatingChat}
           />
         )}
@@ -601,6 +624,7 @@ function ReplayChat({
   variant,
   onOpenList,
   onStartNew,
+  onContinue,
   startingNew,
 }: {
   sessionId: string;
@@ -608,6 +632,7 @@ function ReplayChat({
   variant: "demo" | "closed";
   onOpenList: () => void;
   onStartNew: () => void;
+  onContinue: (sessionId: string) => void;
   startingNew: boolean;
 }) {
   const { data, loading, error, reload } = useFetch(
@@ -678,18 +703,29 @@ function ReplayChat({
               &rsquo;s conversation — demo history
             </>
           ) : (
-            "This chat has ended"
+            "This chat is paused — continue it or start fresh"
           )}
         </p>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={onStartNew}
-          loading={startingNew}
-          className="shrink-0"
-        >
-          Start your own chat
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {variant !== "demo" && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => onContinue(sessionId)}
+              loading={startingNew}
+            >
+              Continue this chat
+            </Button>
+          )}
+          <Button
+            variant={variant === "demo" ? "primary" : "secondary"}
+            size="sm"
+            onClick={onStartNew}
+            loading={startingNew}
+          >
+            Start your own chat
+          </Button>
+        </div>
       </div>
     </ChatFrame>
   );

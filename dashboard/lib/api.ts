@@ -117,6 +117,11 @@ export const api = {
     return post<SessionInfo>(opts?.forceNew ? "/session?new=1" : "/session");
   },
 
+  /** Continue an ended own-chat: reactivates the session and makes it active. */
+  activateChat(sessionId: string): Promise<SessionInfo> {
+    return post<SessionInfo>("/chats/activate", { sessionId });
+  },
+
   /** Seeded demo conversations, public — browsed from the customer view. */
   async demoChats(): Promise<DemoChatSummary[]> {
     const res = await get<{ chats?: unknown[] }>("/demo-chats");

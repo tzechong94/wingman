@@ -28,10 +28,11 @@ import fs from 'fs';
 import type http from 'http';
 import path from 'path';
 
-import { getSession } from '../../db/sessions.js';
+import { getSession, updateSession } from '../../db/sessions.js';
 import { getPendingApproval, getPendingApprovalsByAction } from '../../db/sessions.js';
 import {
   bumpWebVisitorMessages,
+  setWebVisitorSession,
   getAnalyticsTiles,
   getConvEvents,
   getRecentConvEvents,
@@ -428,6 +429,51 @@ async function handle(req: Req, res: Res): Promise<void> {
           if (c && q.customer_name) c.customerName = q.customer_name;
         }
         json(res, 200, { chats: [...seen.values()].sort((a, b) => (a.lastTs < b.lastTs ? 1 : -1)) });
+        return;
+      }
+
+      case 'POST chats': {
+        // POST /webhook/web/chats/activate {sessionId} — continue an ended
+        // chat: reactivate the same session (transcript + memory intact),
+        // make it this visitor's active chat, respawn the container.
+        if (sub.split('/')[2] !== 'activate') {
+          json(res, 404, { error: 'No route.' });
+          return;
+        }
+        const vid = visitorId(req);
+        const visitor = vid ? getWebVisitor(vid) : undefined;
+        if (!visitor) {
+          json(res, 401, { error: 'No visitor session.' });
+          return;
+        }
+        const body = await readJson(req, res);
+        if (!body) return;
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+        const row = sessionId
+          ? getDb()
+              .prepare('SELECT 1 FROM sessions WHERE id = ? AND messaging_group_id = ?')
+              .get(sessionId, visitor.messaging_group_id)
+          : undefined;
+        if (!row) {
+          json(res, 403, { error: 'Not your conversation.' });
+          return;
+        }
+        const target = getSession(sessionId);
+        if (!target) {
+          json(res, 404, { error: 'Unknown session.' });
+          return;
+        }
+        // Close the currently-active session (if different) and switch.
+        if (visitor.session_id && visitor.session_id !== sessionId) {
+          const current = getSession(visitor.session_id);
+          if (current && current.status === 'active') updateSession(current.id, { status: 'closed' });
+        }
+        if (target.status !== 'active') updateSession(target.id, { status: 'active' });
+        setWebVisitorSession(visitor.visitor_id, target.id);
+        void wakeContainer({ ...target, status: 'active' }).catch((err) =>
+          log.warn('activate: container wake failed', { sessionId, err }),
+        );
+        json(res, 200, { visitorId: visitor.visitor_id, sessionId: target.id });
         return;
       }
 
