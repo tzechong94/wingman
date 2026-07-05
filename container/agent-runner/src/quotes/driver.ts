@@ -245,6 +245,20 @@ export async function handleQuoteDraft(
     });
 
     if (decision.autoSend) {
+      // Deterministic dedup: an auto-send identical to the last card we sent
+      // (same items, discount, total) is a re-statement, not new information
+      // — sending it again reads as a broken bot. Suppress with a reasoning
+      // event; the prose (if any) still goes out.
+      if (isDuplicateOfLastQuote(record)) {
+        emitReasoning(deps, {
+          ts: deps.now().toISOString(),
+          type: 'rule',
+          summary: 'Identical re-quote suppressed',
+          detail: 'Draft matches the last quote card already sent — nothing changed',
+        });
+        log(`duplicate quote suppressed (${fmtCents(record.totalCents, record.currency)})`);
+        return { handled: false };
+      }
       const msgId = generateId('msg');
       record.pdfFile = await deps.renderPdf(msgId, record, rules);
 
@@ -313,6 +327,33 @@ export async function handleQuoteDraft(
     });
     return { handled: false };
   }
+}
+
+/** True when the draft matches the most recent quote card sent in this session. */
+function isDuplicateOfLastQuote(record: QuoteRecord): boolean {
+  try {
+    const { getOutboundDb } = require('../db/connection.js') as typeof import('../db/connection.js');
+    const rows = getOutboundDb()
+      .prepare("SELECT content FROM messages_out WHERE kind = 'chat' ORDER BY seq DESC LIMIT 20")
+      .all() as Array<{ content: string }>;
+    for (const r of rows) {
+      const c = JSON.parse(r.content) as { quote?: QuoteRecord };
+      if (!c.quote) continue;
+      const q = c.quote;
+      const sameItems =
+        q.lineItems.length === record.lineItems.length &&
+        q.lineItems.every(
+          (li, i) =>
+            li.description === record.lineItems[i].description &&
+            li.qty === record.lineItems[i].qty &&
+            li.unitPriceCents === record.lineItems[i].unitPriceCents,
+        );
+      return sameItems && (q.discountPct ?? 0) === (record.discountPct ?? 0) && q.totalCents === record.totalCents;
+    }
+  } catch {
+    /* dedup is best-effort */
+  }
+  return false;
 }
 
 function emitReasoning(deps: DriverDeps, event: ReasoningEvent): void {

@@ -163,6 +163,7 @@ export async function extractQuoteDecision(
 
   const sys =
     `You are the quoting engine for ${rules.businessName || DEFAULT_HOUSE_RULES.businessName}. ` +
+    `House rules: max auto-approved discount ${rules.maxAutoDiscountPct}%. ` +
     `Given the rate card and a conversation, decide if the customer's CURRENT request is fully scoped and quotable. ` +
     `Reply with STRICT JSON only — ALL FLAT STRING/NUMBER FIELDS, NO nested objects or arrays:\n` +
     `{"quotable": boolean, "reason": string, "customerName": string|null, ` +
@@ -170,7 +171,11 @@ export async function extractQuoteDecision(
     `Field rules:\n` +
     `- "items": rate-card services as "REF xQTY" separated by "; ". Example: "RC-07 x1; RC-01 x3". NEVER include prices — the system prices refs itself.\n` +
     `- "offCard": services NOT on the rate card as "description @ SGD-estimate xQTY" separated by "; ". Empty string if none. Example: "custom ducting for server room @ 900 x1".\n` +
-    `- "discountPct": the discount percentage the CUSTOMER asked for, else null. Never decide discounts yourself.\n` +
+    `- "discountPct": the discount percentage the CUSTOMER asked for, else null. If the customer asks for a discount ` +
+    `WITHOUT naming a number ("can I get a discount?"), use the house maximum (${rules.maxAutoDiscountPct}) — the business's ` +
+    `standard gesture. A named number always wins over the default.\n` +
+    `- NEVER emit a draft identical to the last formal quote card (same items, same discount): if nothing about the ` +
+    `request changed the quote, quotable=false with reason "identical to last quote".\n` +
     `- Judge quotability ONLY from what the CUSTOMER has said (anywhere in the transcript): quotable=true when the ` +
     `customer's messages establish unit count, unit type (wall-mounted / ceiling cassette / window), and the needed service. ` +
     `IGNORE the assistant's own questions — assistants over-ask; a redundant assistant question never blocks a quote.\n` +
