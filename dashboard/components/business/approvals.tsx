@@ -9,23 +9,24 @@ import {
   type ApprovalItem,
 } from "@/lib/types";
 import { useMemo, useState } from "react";
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, InboxIcon, XIcon } from "../icons";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, XIcon } from "../icons";
 import { QuoteCard } from "../quote-card";
-import { Button, Card, CenteredState, Spinner, StatusChip } from "../ui";
+import { Button, Card, StatusChip } from "../ui";
 
-export function ApprovalsQueue({
+/**
+ * "Needs you" section for one chat: pending approvals as full cards with
+ * Approve/Reject (optimistic), resolved ones collapsed into a history list.
+ */
+export function SessionApprovals({
   approvals,
-  loading,
-  error,
-  onReload,
   onDecided,
+  onReload,
   onAuthLost,
 }: {
+  /** Already filtered to the selected session. */
   approvals: ApprovalItem[];
-  loading: boolean;
-  error: unknown;
-  onReload: () => void;
   onDecided: (approvalId: string, decision: "approve" | "reject") => void;
+  onReload: () => void;
   onAuthLost: () => void;
 }) {
   const { toast } = useToast();
@@ -72,44 +73,9 @@ export function ApprovalsQueue({
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold text-ink">Needs your call</h2>
-        <span className="text-xs text-muted tabular-nums">
-          {pending.length} pending
-        </span>
-      </div>
-
-      {loading && approvals.length === 0 && (
-        <Card>
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted">
-            <Spinner className="size-4" /> Loading approvals…
-          </div>
-        </Card>
-      )}
-
-      {Boolean(error) && approvals.length === 0 && !loading && (
-        <Card>
-          <CenteredState
-            title="Couldn't load approvals"
-            hint="The host didn't respond."
-            action={
-              <Button size="sm" onClick={onReload}>
-                Retry
-              </Button>
-            }
-          />
-        </Card>
-      )}
-
-      {!loading && !error && pending.length === 0 && (
-        <Card>
-          <CenteredState
-            icon={<InboxIcon className="size-6" />}
-            title="Queue is clear"
-            hint="Escalated quotes and follow-up nudges will land here when the agent needs a human call."
-          />
-        </Card>
+    <div className="space-y-2.5">
+      {pending.length === 0 && (
+        <p className="text-xs text-faint">Nothing needs you in this chat.</p>
       )}
 
       {pending.map((a) => (
@@ -159,7 +125,7 @@ export function ApprovalsQueue({
   );
 }
 
-function ApprovalCard({
+export function ApprovalCard({
   approval,
   busy,
   onDecide,

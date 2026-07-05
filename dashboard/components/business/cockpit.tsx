@@ -1,13 +1,20 @@
 "use client";
 
 import { api, ApiError, isAuthError } from "@/lib/api";
-import { humanizeSeconds, money } from "@/lib/format";
 import { sseReconnectNow, useConvEvents } from "@/lib/sse";
-import type { Analytics, ConvEvent } from "@/lib/types";
+import {
+  isApprovalPending,
+  normalizeQuote,
+  type Analytics,
+  type ConvEvent,
+  type ConversationSummary,
+  type MsgOutPayload,
+} from "@/lib/types";
 import { useFetch } from "@/lib/use-fetch";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -15,22 +22,22 @@ import {
 } from "react";
 import {
   ActivityIcon,
+  AlertCircleIcon,
   BrainIcon,
   FileTextIcon,
   LoaderIcon,
   LockIcon,
-  MessageSquareIcon,
 } from "../icons";
-import { AlertCircleIcon } from "../icons";
-import { Button, Card, CenteredState, Spinner, Tabs } from "../ui";
+import { Button, Card, CenteredState, Modal, Spinner } from "../ui";
 import { ActivityFeed } from "./activity";
-import { ApprovalsQueue } from "./approvals";
-import { ConversationsTab } from "./conversations";
+import { ChatList } from "./chat-list";
+import { ChatPane, ChatPaneEmpty } from "./chat-pane";
+import { ContextPanel, ContextPanelEmpty } from "./context-panel";
 import { MemoryTab } from "./memory-tab";
 import { QuotesTab } from "./quotes-tab";
 
 type AuthPhase = "checking" | "need_token" | "authed" | "error";
-type TabValue = "activity" | "conversations" | "quotes" | "memory";
+type Overlay = "activity" | "quotes" | "memory" | null;
 
 const MAX_ACTIVITY_ITEMS = 200;
 
@@ -162,7 +169,78 @@ function TokenGate({ onAuthed }: { onAuthed: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Cockpit body
+// Session transcript: fetched history merged with live SSE events
+// ---------------------------------------------------------------------------
+
+function useSessionTranscript(
+  sessionId: string | null,
+  onAuthLost: () => void,
+) {
+  const [base, setBase] = useState<ConvEvent[]>([]);
+  const [live, setLive] = useState<ConvEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const genRef = useRef(0);
+  const onAuthLostRef = useRef(onAuthLost);
+  onAuthLostRef.current = onAuthLost;
+
+  const load = useCallback(
+    (id: string, silent = false) => {
+      const gen = ++genRef.current;
+      if (!silent) setLoading(true);
+      setError(null);
+      api
+        .transcript({ sessionId: id })
+        .then((events) => {
+          if (genRef.current !== gen) return;
+          setBase(events);
+          setLoading(false);
+        })
+        .catch((err: unknown) => {
+          if (genRef.current !== gen) return;
+          if (isAuthError(err)) onAuthLostRef.current();
+          setError(err);
+          setLoading(false);
+        });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    genRef.current++; // invalidate any in-flight load
+    setBase([]);
+    setLive([]);
+    setError(null);
+    setLoading(false);
+    if (sessionId) load(sessionId);
+  }, [sessionId, load]);
+
+  /** Feed a live SSE event for this session into the transcript. */
+  const append = useCallback((e: ConvEvent) => {
+    setLive((prev) =>
+      prev.some((p) => p.id === e.id) ? prev : [...prev, e],
+    );
+  }, []);
+
+  const reload = useCallback(
+    (silent = false) => {
+      if (sessionId) load(sessionId, silent);
+    },
+    [sessionId, load],
+  );
+
+  const events = useMemo(() => {
+    const map = new Map<number, ConvEvent>();
+    for (const e of base) map.set(e.id, e);
+    for (const e of live) if (!map.has(e.id)) map.set(e.id, e);
+    return [...map.values()].sort((a, b) => a.id - b.id);
+  }, [base, live]);
+
+  return { events, loading, error, reload, append };
+}
+
+// ---------------------------------------------------------------------------
+// Cockpit body — WhatsApp-Web-style 3-pane inbox
 // ---------------------------------------------------------------------------
 
 function Cockpit({
@@ -174,9 +252,12 @@ function Cockpit({
   onAnalytics: (a: Analytics) => void;
   onAuthLost: () => void;
 }) {
-  const [tab, setTab] = useState<TabValue>("activity");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay>(null);
   const [activity, setActivity] = useState<ConvEvent[]>([]);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const guard = useCallback(
     <T,>(fn: () => Promise<T>): (() => Promise<T>) =>
@@ -191,17 +272,30 @@ function Cockpit({
     [onAuthLost],
   );
 
-  const approvalsFetch = useFetch(guard(() => api.approvals()));
   const conversationsFetch = useFetch(guard(() => api.conversations()));
+  const approvalsFetch = useFetch(guard(() => api.approvals()));
   const quotesFetch = useFetch(guard(() => api.quotes()));
 
+  const { reload: reloadConversations, mutate: mutateConversations } =
+    conversationsFetch;
   const { reload: reloadApprovals } = approvalsFetch;
-  const { reload: reloadConversations } = conversationsFetch;
   const { reload: reloadQuotes } = quotesFetch;
 
-  // Live updates: approval/quote events refresh the queue, quotes and tiles.
+  const transcript = useSessionTranscript(selectedId, onAuthLost);
+  const { append: appendTranscript } = transcript;
+
+  const scheduleListReload = useCallback(() => {
+    if (listTimer.current) return;
+    listTimer.current = setTimeout(() => {
+      listTimer.current = null;
+      reloadConversations();
+    }, 600);
+  }, [reloadConversations]);
+
+  // Live updates from the owner firehose.
   const onEvent = useCallback(
     (e: ConvEvent) => {
+      // Global activity accumulator (for the Activity overlay).
       if (
         e.type === "reasoning" ||
         e.type === "quote" ||
@@ -213,21 +307,56 @@ function Cockpit({
           return [e, ...prev].slice(0, MAX_ACTIVITY_ITEMS);
         });
       }
+
+      // Selected chat: feed the transcript directly (no refetch).
+      if (e.sessionId && e.sessionId === selectedId) appendTranscript(e);
+
+      // Left list: bump preview/time in place; refetch only for new sessions.
+      if (e.type === "msg_in" || e.type === "msg_out") {
+        mutateConversations((prev) => {
+          if (!prev) return prev;
+          const idx = prev.findIndex((c) => c.sessionId === e.sessionId);
+          if (idx === -1) {
+            scheduleListReload(); // brand-new conversation
+            return prev;
+          }
+          const cur = prev[idx];
+          if (!cur) return prev;
+          const text =
+            typeof e.payload.text === "string" ? e.payload.text : "";
+          const next = [...prev];
+          next[idx] = {
+            ...cur,
+            lastTs: Math.max(cur.lastTs, e.ts),
+            lastType: e.type,
+            preview: text ? text.slice(0, 120) : cur.preview,
+          };
+          return next;
+        });
+      }
+
+      // Approval / quote events refresh the queues, tiles and badges.
       if (e.type === "approval" || e.type === "quote") {
         if (refreshTimer.current) clearTimeout(refreshTimer.current);
         refreshTimer.current = setTimeout(() => {
           refreshTimer.current = null;
           reloadApprovals();
           reloadQuotes();
+          reloadConversations();
           api.analytics().then(onAnalytics).catch(() => undefined);
         }, 400);
       }
-      if (e.type === "msg_in" || e.type === "msg_out") {
-        // Keep the conversations list roughly fresh without hammering the API.
-        if (tab === "conversations") reloadConversations();
-      }
     },
-    [reloadApprovals, reloadQuotes, reloadConversations, onAnalytics, tab],
+    [
+      selectedId,
+      appendTranscript,
+      mutateConversations,
+      scheduleListReload,
+      reloadApprovals,
+      reloadQuotes,
+      reloadConversations,
+      onAnalytics,
+    ],
   );
 
   const sseState = useConvEvents(onEvent, true);
@@ -235,181 +364,211 @@ function Cockpit({
   useEffect(
     () => () => {
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      if (listTimer.current) clearTimeout(listTimer.current);
     },
     [],
   );
 
+  const conversations = conversationsFetch.data ?? [];
+
+  // Live per-chat pending counts from the approvals fetch (fresher than the
+  // conversations snapshot, and tracks optimistic approve/reject instantly).
+  const pendingBySession = useMemo(() => {
+    if (!approvalsFetch.data) return null;
+    const m = new Map<string, number>();
+    for (const a of approvalsFetch.data) {
+      if (!isApprovalPending(a) || !a.sessionId) continue;
+      m.set(a.sessionId, (m.get(a.sessionId) ?? 0) + 1);
+    }
+    return m;
+  }, [approvalsFetch.data]);
+
+  const selectedConv = useMemo<ConversationSummary | null>(() => {
+    if (!selectedId) return null;
+    return (
+      conversations.find((c) => c.sessionId === selectedId) ?? {
+        sessionId: selectedId,
+        lastTs: 0,
+        lastType: "",
+        preview: "",
+        pendingApprovals: 0,
+        customerName: null,
+      }
+    );
+  }, [conversations, selectedId]);
+
+  const sessionApprovals = useMemo(
+    () =>
+      (approvalsFetch.data ?? []).filter((a) => a.sessionId === selectedId),
+    [approvalsFetch.data, selectedId],
+  );
+
+  const sessionQuotes = useMemo(
+    () => (quotesFetch.data ?? []).filter((q) => q.sessionId === selectedId),
+    [quotesFetch.data, selectedId],
+  );
+
+  // quoteId → PDF url, mined from this chat's msg_out events.
+  const quotePdfUrls = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of transcript.events) {
+      if (e.type !== "msg_out") continue;
+      const p = e.payload as MsgOutPayload;
+      const q = normalizeQuote(p.quote);
+      const url = p.files?.find((f) => f.url)?.url;
+      if (q?.id && url) m.set(q.id, url);
+    }
+    return m;
+  }, [transcript.events]);
+
+  const onDecided = useCallback(
+    (approvalId: string, decision: "approve" | "reject") => {
+      approvalsFetch.mutate((prev) =>
+        (prev ?? []).map((a) =>
+          a.approvalId === approvalId
+            ? { ...a, status: decision === "approve" ? "approved" : "rejected" }
+            : a,
+        ),
+      );
+    },
+    [approvalsFetch],
+  );
+
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-ink">Owner cockpit</h1>
-          <p className="text-sm text-muted">
-            Everything your agent did — and the few calls it saved for you.
-          </p>
+    <div className="flex h-full flex-col">
+      {/* Slim top bar */}
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-line bg-panel px-3.5">
+        <p className="truncate text-xs font-semibold text-ink">
+          CoolBreeze — Owner cockpit
+        </p>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="mr-1.5 inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-2 py-0.5 text-[10px] font-medium text-muted">
+            {sseState === "open" ? (
+              <span className="size-1.5 rounded-full bg-accent" />
+            ) : (
+              <LoaderIcon className="size-3 animate-spin" />
+            )}
+            {sseState === "open" ? "Live" : "Reconnecting…"}
+          </span>
+          <TopBarButton
+            label="Activity — everything the agent did"
+            onClick={() => setOverlay("activity")}
+          >
+            <ActivityIcon className="size-4" />
+          </TopBarButton>
+          <TopBarButton
+            label="All quotes"
+            onClick={() => setOverlay("quotes")}
+          >
+            <FileTextIcon className="size-4" />
+          </TopBarButton>
+          <TopBarButton
+            label="Agent memory"
+            onClick={() => setOverlay("memory")}
+          >
+            <BrainIcon className="size-4" />
+          </TopBarButton>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 py-1 text-[11px] font-medium text-muted">
-          {sseState === "open" ? (
-            <span className="size-1.5 rounded-full bg-accent" />
-          ) : (
-            <LoaderIcon className="size-3 animate-spin" />
-          )}
-          {sseState === "open" ? "Live" : "Reconnecting…"}
-        </span>
       </div>
 
-      <StatTiles analytics={analytics} />
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(320px,5fr)_7fr]">
-        <ApprovalsQueue
-          approvals={approvalsFetch.data ?? []}
-          loading={approvalsFetch.loading}
-          error={approvalsFetch.error}
-          onReload={reloadApprovals}
-          onAuthLost={onAuthLost}
-          onDecided={(approvalId, decision) => {
-            approvalsFetch.mutate((prev) =>
-              (prev ?? []).map((a) =>
-                a.approvalId === approvalId
-                  ? { ...a, status: decision === "approve" ? "approved" : "rejected" }
-                  : a,
-              ),
-            );
-          }}
+      {/* Three panes */}
+      <div className="relative flex min-h-0 flex-1">
+        <ChatList
+          conversations={conversations}
+          loading={conversationsFetch.loading}
+          error={conversationsFetch.error}
+          onReload={reloadConversations}
+          analytics={analytics}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          pendingBySession={pendingBySession}
         />
 
-        <Card className="self-start overflow-hidden">
-          <div className="px-2 pt-1">
-            <Tabs<TabValue>
-              value={tab}
-              onChange={setTab}
-              options={[
-                {
-                  value: "activity",
-                  label: "Activity",
-                  icon: <ActivityIcon className="size-3.5" />,
-                },
-                {
-                  value: "conversations",
-                  label: "Conversations",
-                  icon: <MessageSquareIcon className="size-3.5" />,
-                },
-                {
-                  value: "quotes",
-                  label: "Quotes",
-                  icon: <FileTextIcon className="size-3.5" />,
-                },
-                {
-                  value: "memory",
-                  label: "Memory",
-                  icon: <BrainIcon className="size-3.5" />,
-                },
-              ]}
+        {selectedConv ? (
+          <>
+            <ChatPane
+              conversation={selectedConv}
+              events={transcript.events}
+              loading={transcript.loading}
+              error={transcript.error}
+              onReload={() => transcript.reload(true)}
+              onAuthLost={onAuthLost}
+              contextOpen={contextOpen}
+              onToggleContext={() => setContextOpen((v) => !v)}
             />
-          </div>
-          <div className="max-h-[32rem] min-h-64 overflow-y-auto">
-            {tab === "activity" && <ActivityFeed items={activity} />}
-            {tab === "conversations" && (
-              <ConversationsTab
-                conversations={conversationsFetch.data ?? []}
-                loading={conversationsFetch.loading}
-                error={conversationsFetch.error}
-                onReload={reloadConversations}
-                onAuthLost={onAuthLost}
-              />
-            )}
-            {tab === "quotes" && (
-              <QuotesTab
-                quotes={quotesFetch.data ?? []}
-                loading={quotesFetch.loading}
-                error={quotesFetch.error}
-                onReload={reloadQuotes}
-              />
-            )}
-            {tab === "memory" && <MemoryTab />}
-          </div>
-        </Card>
+            <ContextPanel
+              sessionId={selectedConv.sessionId}
+              customerName={selectedConv.customerName}
+              approvals={sessionApprovals}
+              approvalsLoading={approvalsFetch.loading}
+              onDecided={onDecided}
+              onReloadApprovals={reloadApprovals}
+              onAuthLost={onAuthLost}
+              quotes={sessionQuotes}
+              quotesLoading={quotesFetch.loading}
+              quotePdfUrls={quotePdfUrls}
+              events={transcript.events}
+              open={contextOpen}
+              onClose={() => setContextOpen(false)}
+            />
+          </>
+        ) : (
+          <>
+            <ChatPaneEmpty
+              contextOpen={contextOpen}
+              onToggleContext={() => setContextOpen((v) => !v)}
+            />
+            <ContextPanelEmpty
+              open={contextOpen}
+              onClose={() => setContextOpen(false)}
+            />
+          </>
+        )}
       </div>
+
+      {/* Global overlays — the old tabs, unchanged, in full-screen drawers */}
+      {overlay === "activity" && (
+        <Modal full title="Activity — live firehose" onClose={() => setOverlay(null)}>
+          <ActivityFeed items={activity} />
+        </Modal>
+      )}
+      {overlay === "quotes" && (
+        <Modal full title="All quotes" onClose={() => setOverlay(null)}>
+          <QuotesTab
+            quotes={quotesFetch.data ?? []}
+            loading={quotesFetch.loading}
+            error={quotesFetch.error}
+            onReload={reloadQuotes}
+          />
+        </Modal>
+      )}
+      {overlay === "memory" && (
+        <Modal full title="Agent memory" onClose={() => setOverlay(null)}>
+          <MemoryTab />
+        </Modal>
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Stat tiles
-// ---------------------------------------------------------------------------
-
-function StatTiles({ analytics }: { analytics: Analytics | null }) {
-  if (!analytics) {
-    return (
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
-          <Card key={i} className="h-24 animate-pulse bg-panel-2/40">
-            <span className="sr-only">Loading…</span>
-          </Card>
-        ))}
-      </div>
-    );
-  }
-
-  const { quotesSent7d, autoSent7d, escalated7d, medianResponseSeconds } =
-    analytics;
-  const counterfactual =
-    escalated7d === 0
-      ? autoSent7d > 0
-        ? "None needed you — fully hands-off."
-        : "Waiting for the first quote."
-      : `You only saw the ${escalated7d}.`;
-
-  return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-      <StatTile
-        label="Quotes (7d)"
-        value={String(quotesSent7d)}
-        sub="sent by your agent"
-      />
-      <StatTile
-        label="Auto vs escalated"
-        value={
-          <span>
-            {autoSent7d} auto{" "}
-            <span className="font-normal text-muted">·</span> {escalated7d}{" "}
-            needed you
-          </span>
-        }
-        sub={counterfactual}
-      />
-      <StatTile
-        label="Median response"
-        value={humanizeSeconds(medianResponseSeconds)}
-        sub="customer message → reply"
-      />
-      <StatTile
-        label="Quoted (7d)"
-        value={money(analytics.centsQuoted7d, analytics.currency)}
-        sub="total value quoted"
-      />
-    </div>
-  );
-}
-
-function StatTile({
+function TopBarButton({
   label,
-  value,
-  sub,
+  onClick,
+  children,
 }: {
   label: string;
-  value: ReactNode;
-  sub: string;
+  onClick: () => void;
+  children: ReactNode;
 }) {
   return (
-    <Card className="px-4 py-3.5">
-      <p className="text-[11px] font-semibold tracking-wide text-muted uppercase">
-        {label}
-      </p>
-      <p className="mt-1.5 text-xl leading-tight font-semibold text-ink tabular-nums">
-        {value}
-      </p>
-      <p className="mt-1 text-xs text-muted">{sub}</p>
-    </Card>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="rounded-md p-1.5 text-muted transition-colors hover:bg-panel-2 hover:text-ink"
+    >
+      {children}
+    </button>
   );
 }

@@ -89,6 +89,39 @@ function describe(e: ConvEvent): ActivityRow {
   };
 }
 
+/**
+ * Compact icon-timeline of reasoning steps for one session — the small
+ * treatment used in the cockpit's right context panel. `items` oldest-first.
+ */
+export function ReasoningTimeline({ items }: { items: ConvEvent[] }) {
+  return (
+    <ol className="space-y-2">
+      {items.map((e) => {
+        const row = describe(e);
+        const RowIcon = row.icon;
+        return (
+          <li key={e.id} className="flex items-start gap-2">
+            <span className={`mt-0.5 shrink-0 ${row.tint}`}>
+              <RowIcon className="size-3.5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs leading-snug text-ink">{row.title}</p>
+              {row.detail && (
+                <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">
+                  {row.detail}
+                </p>
+              )}
+              <p className="mt-0.5 text-[10px] text-faint tabular-nums">
+                {clockTime(e.ts)}
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 /** Live reasoning feed. `items` are newest-first, accumulated by the cockpit. */
 export function ActivityFeed({ items }: { items: ConvEvent[] }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());

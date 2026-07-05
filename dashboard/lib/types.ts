@@ -118,6 +118,10 @@ export interface ConversationSummary {
   lastTs: number;
   lastType: string;
   preview: string;
+  /** Count of approvals still waiting on a decision in this chat. */
+  pendingApprovals: number;
+  /** Customer name (from their quotes) when known, else null for visitors. */
+  customerName: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,11 +309,16 @@ export function normalizeApproval(raw: unknown): ApprovalItem | null {
 export function normalizeConversation(raw: unknown): ConversationSummary | null {
   if (!isRecord(raw)) return null;
   const r = raw;
+  const customerName = pick(r, "customerName", "customer_name");
   return {
     sessionId: String(pick(r, "sessionId", "session_id") ?? ""),
     lastTs: toMillis(pick(r, "lastTs", "last_ts")),
     lastType: String(pick(r, "lastType", "last_type") ?? ""),
     preview: String(r.preview ?? ""),
+    pendingApprovals:
+      Number(pick(r, "pendingApprovals", "pending_approvals") ?? 0) || 0,
+    customerName:
+      typeof customerName === "string" && customerName ? customerName : null,
   };
 }
 

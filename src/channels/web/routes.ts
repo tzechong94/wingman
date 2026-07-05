@@ -357,18 +357,56 @@ async function handle(req: Req, res: Res): Promise<void> {
           json(res, 403, { error: 'Owner only.' });
           return;
         }
-        // Latest ~500 events grouped per session — demo scale by design.
-        const events = getRecentConvEvents(0, 500).reverse();
-        const seen = new Map<string, { sessionId: string; lastTs: string; lastType: string; preview: string }>();
+        // Latest ~1000 events grouped per session — demo scale by design.
+        // Preview prefers the latest human-readable chat line over reasoning
+        // noise; enriched with per-chat pending-approval badges and the
+        // customer's name (from their quotes) for the WhatsApp-style list.
+        const events = getRecentConvEvents(0, 1000).reverse();
+        const seen = new Map<
+          string,
+          {
+            sessionId: string;
+            lastTs: string;
+            lastType: string;
+            preview: string;
+            pendingApprovals: number;
+            customerName: string | null;
+          }
+        >();
         for (const e of events) {
-          if (seen.has(e.session_id)) continue;
+          const existing = seen.get(e.session_id);
           const p = safeParse(e.payload) as { text?: string; summary?: string };
-          seen.set(e.session_id, {
-            sessionId: e.session_id,
-            lastTs: e.ts,
-            lastType: e.type,
-            preview: (p.text || p.summary || e.type).slice(0, 120),
-          });
+          if (!existing) {
+            seen.set(e.session_id, {
+              sessionId: e.session_id,
+              lastTs: e.ts,
+              lastType: e.type,
+              preview: (p.text || p.summary || e.type).slice(0, 120),
+              pendingApprovals: 0,
+              customerName: null,
+            });
+          } else if (
+            !/[a-z]/i.test(existing.preview) ||
+            (existing.lastType === 'reasoning' && (e.type === 'msg_in' || e.type === 'msg_out'))
+          ) {
+            // Upgrade a noisy preview to the most recent chat line we find.
+            if (p.text) {
+              existing.preview = p.text.slice(0, 120);
+              existing.lastType = e.type;
+            }
+          }
+        }
+        const pending = [
+          ...getPendingApprovalsByAction('send_quote'),
+          ...getPendingApprovalsByAction('send_nudge'),
+        ].filter((a) => a.status === 'pending');
+        for (const a of pending) {
+          const conv = a.session_id ? seen.get(a.session_id) : undefined;
+          if (conv) conv.pendingApprovals++;
+        }
+        for (const q of listQuotes(200)) {
+          const conv = seen.get(q.session_id);
+          if (conv && !conv.customerName && q.customer_name) conv.customerName = q.customer_name;
         }
         json(res, 200, { conversations: [...seen.values()] });
         return;

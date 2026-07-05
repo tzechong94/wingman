@@ -218,12 +218,15 @@ export function Modal({
   children,
   headerExtra,
   wide = false,
+  full = false,
 }: {
   title: ReactNode;
   onClose: () => void;
   children: ReactNode;
   headerExtra?: ReactNode;
   wide?: boolean;
+  /** Near-full-screen overlay (used by the cockpit's global drawers). */
+  full?: boolean;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -247,8 +250,12 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         className={clsx(
-          "flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-xl",
-          wide ? "max-w-2xl" : "max-w-lg",
+          "flex w-full flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-xl",
+          full
+            ? "h-[calc(100dvh-3rem)] max-h-none max-w-4xl"
+            : wide
+              ? "max-h-[85vh] max-w-2xl"
+              : "max-h-[85vh] max-w-lg",
         )}
       >
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
