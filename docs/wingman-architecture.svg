@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760" font-family="Menlo, Consolas, monospace">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#475569"/>
+    </marker>
+    <marker id="arrg" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#059669"/>
+    </marker>
+  </defs>
+
+  <rect width="1180" height="760" fill="#f8fafc"/>
+  <text x="30" y="42" font-size="22" font-weight="bold" fill="#0f172a">Wingman — architecture</text>
+  <text x="30" y="64" font-size="12" fill="#64748b">Qwen Cloud Hackathon · Track 4 · NanoClaw fork · every model call = Alibaba Cloud Model Studio (DashScope)</text>
+
+  <!-- ═══ Left: people ═══ -->
+  <rect x="30" y="100" width="200" height="120" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="130" y="126" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="middle">CUSTOMER</text>
+  <text x="130" y="148" font-size="11" fill="#334155" text-anchor="middle">web chat (cockpit)</text>
+  <text x="130" y="166" font-size="11" fill="#334155" text-anchor="middle">Telegram</text>
+  <text x="130" y="192" font-size="10" fill="#64748b" text-anchor="middle">"my aircon smells weird…"</text>
+
+  <rect x="30" y="560" width="200" height="150" rx="10" fill="#fdf4ff" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="130" y="586" font-size="13" font-weight="bold" fill="#7e22ce" text-anchor="middle">OWNER</text>
+  <text x="130" y="608" font-size="11" fill="#334155" text-anchor="middle">Telegram: approve / reject,</text>
+  <text x="130" y="624" font-size="11" fill="#334155" text-anchor="middle">"max 15%" · "status" · "tell…"</text>
+  <text x="130" y="646" font-size="11" fill="#334155" text-anchor="middle">Cockpit: inbox · barge-in ·</text>
+  <text x="130" y="662" font-size="11" fill="#334155" text-anchor="middle">quotes · memory · audit</text>
+  <text x="130" y="690" font-size="10" fill="#64748b" text-anchor="middle">human-in-the-loop, both ways</text>
+
+  <!-- ═══ Middle: host ═══ -->
+  <rect x="300" y="100" width="280" height="610" rx="10" fill="#ffffff" stroke="#475569" stroke-width="1.5"/>
+  <text x="440" y="126" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="middle">HOST (Node)</text>
+  <text x="440" y="142" font-size="10" fill="#64748b" text-anchor="middle">Alibaba Cloud ECS · systemd · Caddy</text>
+
+  <rect x="320" y="158" width="240" height="56" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="440" y="180" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">router + web channel</text>
+  <text x="440" y="198" font-size="10" fill="#64748b" text-anchor="middle">per-visitor sessions · SSE live feed</text>
+
+  <rect x="320" y="226" width="240" height="72" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="440" y="248" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">approvals primitive</text>
+  <text x="440" y="266" font-size="10" fill="#64748b" text-anchor="middle">one record → Telegram card + badge</text>
+  <text x="440" y="282" font-size="10" fill="#059669" text-anchor="middle">on approve: HOST delivers (no model)</text>
+
+  <rect x="320" y="310" width="240" height="72" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="440" y="332" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">owner command channel</text>
+  <text x="440" y="350" font-size="10" fill="#64748b" text-anchor="middle">approve · reject+instruction · status</text>
+  <text x="440" y="366" font-size="10" fill="#64748b" text-anchor="middle">qwen-turbo classify → code dispatch</text>
+
+  <rect x="320" y="394" width="240" height="56" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="440" y="416" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">sweep + scheduler</text>
+  <text x="440" y="434" font-size="10" fill="#64748b" text-anchor="middle">24h follow-ups · stale detection</text>
+
+  <rect x="320" y="462" width="240" height="88" rx="6" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="440" y="484" font-size="11" font-weight="bold" fill="#92400e" text-anchor="middle">two SQLite files per session</text>
+  <text x="440" y="504" font-size="10" fill="#78350f" text-anchor="middle">inbound.db — host writes, agent reads</text>
+  <text x="440" y="520" font-size="10" fill="#78350f" text-anchor="middle">outbound.db — agent writes, host reads</text>
+  <text x="440" y="538" font-size="10" fill="#a16207" text-anchor="middle">the ONLY IO surface — no IPC</text>
+
+  <rect x="320" y="562" width="240" height="56" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="440" y="584" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">dashboard (Next.js)</text>
+  <text x="440" y="602" font-size="10" fill="#64748b" text-anchor="middle">customer + business cockpit · :3101</text>
+
+  <rect x="320" y="630" width="240" height="56" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="440" y="652" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">central DB (v2.db)</text>
+  <text x="440" y="670" font-size="10" fill="#64748b" text-anchor="middle">quotes · events · approvals · analytics</text>
+
+  <!-- ═══ Right: agent container ═══ -->
+  <rect x="650" y="100" width="500" height="450" rx="10" fill="#ffffff" stroke="#475569" stroke-width="1.5"/>
+  <text x="900" y="126" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="middle">AGENT CONTAINER (Bun, per session)</text>
+
+  <!-- model zone -->
+  <rect x="670" y="146" width="220" height="180" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="6 3"/>
+  <text x="780" y="168" font-size="11" font-weight="bold" fill="#b91c1c" text-anchor="middle">MODEL — words only</text>
+  <rect x="684" y="182" width="192" height="60" rx="5" fill="#ffffff" stroke="#fca5a5"/>
+  <text x="780" y="202" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">qwen-max chat</text>
+  <text x="780" y="218" font-size="9.5" fill="#64748b" text-anchor="middle">qwen-code CLI over ACP</text>
+  <text x="780" y="232" font-size="9.5" fill="#64748b" text-anchor="middle">persona + rate card inlined</text>
+  <rect x="684" y="252" width="192" height="60" rx="5" fill="#ffffff" stroke="#fca5a5"/>
+  <text x="780" y="272" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">extraction sidecars (t=0)</text>
+  <text x="780" y="288" font-size="9.5" fill="#64748b" text-anchor="middle">quotable? · slot picked? · flat JSON</text>
+  <text x="780" y="302" font-size="9.5" fill="#64748b" text-anchor="middle">qwen-max · qwen-turbo · qwen-vl</text>
+
+  <!-- trusted code zone -->
+  <rect x="910" y="146" width="220" height="180" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="1020" y="168" font-size="11" font-weight="bold" fill="#15803d" text-anchor="middle">TRUSTED CODE — actions</text>
+  <text x="1020" y="192" font-size="10" fill="#334155" text-anchor="middle">prices from parsed rate card</text>
+  <text x="1020" y="210" font-size="10" fill="#334155" text-anchor="middle">rule engine: discount / total /</text>
+  <text x="1020" y="224" font-size="10" fill="#334155" text-anchor="middle">off-card → auto-send or escalate</text>
+  <text x="1020" y="244" font-size="10" fill="#334155" text-anchor="middle">quote cards + Chromium PDFs</text>
+  <text x="1020" y="264" font-size="10" fill="#334155" text-anchor="middle">cal.com: real slots + bookings</text>
+  <text x="1020" y="284" font-size="10" fill="#334155" text-anchor="middle">dedup · nudges · audit events</text>
+  <text x="1020" y="304" font-size="10" fill="#334155" text-anchor="middle">owner FYIs</text>
+
+  <path d="M890 236 L910 236" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- memory -->
+  <rect x="670" y="346" width="220" height="90" rx="8" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="780" y="368" font-size="11" font-weight="bold" fill="#4338ca" text-anchor="middle">Engram memory (MCP)</text>
+  <text x="780" y="388" font-size="9.5" fill="#64748b" text-anchor="middle">episodes → sleep cycle →</text>
+  <text x="780" y="402" font-size="9.5" fill="#64748b" text-anchor="middle">semantic notes + entity graph</text>
+  <text x="780" y="420" font-size="9.5" fill="#64748b" text-anchor="middle">Postgres + pgvector · qwen-turbo</text>
+
+  <!-- external -->
+  <rect x="910" y="346" width="220" height="90" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="1020" y="368" font-size="11" font-weight="bold" fill="#0f766e" text-anchor="middle">External services</text>
+  <text x="1020" y="388" font-size="10" fill="#334155" text-anchor="middle">cal.com API (slots · bookings)</text>
+  <text x="1020" y="406" font-size="10" fill="#334155" text-anchor="middle">Telegram Bot API</text>
+  <text x="1020" y="424" font-size="10" fill="#334155" text-anchor="middle">DashScope (all model calls)</text>
+
+  <text x="900" y="472" font-size="12" font-weight="bold" fill="#0f172a" text-anchor="middle">The trust boundary</text>
+  <text x="900" y="492" font-size="11" fill="#b91c1c" text-anchor="middle">the model is trusted with WORDS…</text>
+  <text x="900" y="510" font-size="11" fill="#15803d" text-anchor="middle">…never with money, calendars, or state — deterministic code does all of that</text>
+  <text x="900" y="532" font-size="10" fill="#64748b" text-anchor="middle">prompt injection can't change a price: limits are rules in code, not prompts</text>
+
+  <!-- ═══ arrows ═══ -->
+  <path d="M230 160 L300 160" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="265" y="150" font-size="9" fill="#64748b" text-anchor="middle">msgs</text>
+  <path d="M300 200 L230 200" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="265" y="216" font-size="9" fill="#64748b" text-anchor="middle">replies·cards·PDF</text>
+
+  <path d="M560 480 L650 300" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="618" y="380" font-size="9" fill="#64748b" text-anchor="middle">poll</text>
+  <path d="M650 330 L562 512" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <path d="M300 640 L230 640" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="265" y="630" font-size="9" fill="#7e22ce" text-anchor="middle">cards·FYIs</text>
+  <path d="M230 672 L300 672" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="265" y="692" font-size="9" fill="#7e22ce" text-anchor="middle">decisions·words</text>
+
+  <path d="M1020 326 L1020 346" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+  <path d="M780 326 L780 346" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- footer -->
+  <text x="30" y="740" font-size="10" fill="#94a3b8">github.com/tzechong94/wingman · fork of NanoClaw (MIT) · memory: github.com/tzechong94/engram</text>
+</svg>

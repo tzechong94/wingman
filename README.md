@@ -81,7 +81,11 @@ ambiguity scoping · correct on-card pricing + PDF · Engram recall · vague-dis
 
 Latest full run: **13/13 scenarios, 40/40 checks**.
 
-## Architecture in one paragraph
+## Architecture
+
+![Wingman architecture](docs/wingman-architecture.svg)
+
+### In one paragraph
 
 Wingman is a fork of [NanoClaw](https://nanoclaw.dev) (MIT — see `NANOCLAW.md`): a Node host orchestrates per-session Bun agent containers, all IO through two SQLite files per session (host writes `inbound.db`, container writes `outbound.db` — no IPC). Wingman adds: the web channel + SSE cockpit (`src/channels/web/`), the quote pipeline (`container/agent-runner/src/quotes/` + `src/modules/quotes/`), the approvals/owner-instruction/owner-command layer, cal.com scheduling, and the Engram memory mount. The dashboard is Next.js + Tailwind (`dashboard/`, port 3101) talking only to the host's HTTP surface.
 
@@ -91,6 +95,20 @@ customer (web/Telegram) ──▶ host router ──▶ inbound.db ──▶ age
 owner phone (Telegram) ◀── approvals/FYIs ◀── host ◀── outbound.db ◀── driver code
 owner cockpit (Next.js) ◀── SSE ────────────┘        cal.com · Engram · PDF
 ```
+
+## Swapping NanoClaw's engine from Claude to Qwen
+
+NanoClaw was built around Claude Code. Repointing it at **qwen-code + DashScope** was not a config change — Qwen behaves differently, and most of Wingman's architecture exists because of what we learned making it production-grade:
+
+| NanoClaw assumed (Claude) | Qwen reality | What we built |
+|---|---|---|
+| The agent CLI reads `CLAUDE.md` itself and calls real MCP tools | qwen-code ignored the persona files and **narrated fake tool tags** into customer chat (`<ask_user_question>…`) | The runner injects the persona + grounding directly into the prompt for non-Claude providers (`container/agent-runner/src/index.ts`); a sanitize layer converts narrated tool markup to plain prose (`quotes/sanitize.ts`) |
+| The model can be trusted to *act* (send messages, call tools) when it says it will | qwen-max says *"one moment, preparing your quote!"* — and then doesn't | **The deterministic driver**: temperature-0 extraction sidecars read the transcript and decide (quotable? slot picked? owner instruction?); trusted code prices, sends, books, escalates (`quotes/extractor.ts`, `quotes/driver.ts`) |
+| Structured output (nested JSON) is reliable | qwen-max **degenerates on nested JSON arrays** (empty arrays, strings-for-objects), even with retries and examples | Fully **flat extraction schemas** (`"items": "RC-07 x2"`); code parses the rate-card markdown table and prices every line item — the model never supplies a price |
+| A coding agent exploring the filesystem is fine | Exploration made customer turns take **minutes** | Zero-tool persona; rate card, house rules, and customer notes inlined into the prompt ("ALREADY LOADED — never read files") |
+| Long-lived query with pushed follow-ups | qwen-code's ACP stream **re-emits prior results** after each push and sometimes answers against stale turn state (customers saw repeated messages and question loops) | **Fresh-turn mode**: each customer message gets its own query resuming from the stored continuation — one query, one result; per-query outbound dedup; corrective nudges when a turn produces nothing deliverable (`poll-loop.ts`) |
+
+The provider itself is ~one file on each side: `container/agent-runner/src/providers/qwen.ts` spawns the qwen-code CLI over ACP (Agent Client Protocol) inside the container, and `src/providers/qwen.ts` on the host injects `DASHSCOPE_API_KEY`/`DASHSCOPE_BASE_URL` from `.env` into the container env and mounts the Engram repo so its MCP server can start. Everything else in the table is the reliability layer that turns a chat model into an employee you can leave alone with customers.
 
 ## Run it locally
 
