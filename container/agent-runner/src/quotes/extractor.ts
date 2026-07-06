@@ -11,6 +11,12 @@
  *
  * The result feeds the same driver (rules → auto-send/escalate). The main
  * model's prose still carries the conversation; money never depends on it.
+ *
+ * All model calls here go to Alibaba Cloud Model Studio (DashScope) —
+ * qwen-max at temperature 0 via the OpenAI-compatible endpoint
+ * (DASHSCOPE_BASE_URL, e.g. https://dashscope-intl.aliyuncs.com/compatible-mode/v1).
+ * The host itself runs on an Alibaba Cloud ECS instance; see
+ * deploy/alibaba/bootstrap.sh + deploy.sh.
  */
 import fs from 'fs';
 
