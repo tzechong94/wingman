@@ -445,6 +445,11 @@ async function buildContainerArgs(
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
 
+  // host.docker.internal resolves natively on Docker Desktop (macOS) but not
+  // on Linux Docker Engine — map it to the host gateway so container configs
+  // that reference host services (Engram's Postgres) work on both.
+  args.push('--add-host', 'host.docker.internal:host-gateway');
+
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
