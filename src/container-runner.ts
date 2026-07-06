@@ -487,6 +487,23 @@ async function buildContainerArgs(
     }
   }
 
+  // Linux bind mounts enforce real ownership: the image runs as `node`
+  // (uid 1000), but a root-run host creates session DBs/workspaces as
+  // root — the container then dies with "attempt to write a readonly
+  // database". macOS Docker Desktop shims ownership, so this only bites
+  // on Linux. Hand the writable mounts to uid 1000 before spawn.
+  if (process.platform === 'linux' && process.getuid?.() === 0) {
+    const { execSync } = await import('child_process');
+    for (const mount of mounts) {
+      if (mount.readonly) continue;
+      try {
+        execSync(`chown -R 1000:1000 ${JSON.stringify(mount.hostPath)}`, { stdio: 'ignore' });
+      } catch (err) {
+        log.warn('chown for container user failed', { hostPath: mount.hostPath, err });
+      }
+    }
+  }
+
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
   // are routed through the agent vault for credential injection, and mounts
   // any credential stubs the gateway serves (e.g. a sentinel auth file).
