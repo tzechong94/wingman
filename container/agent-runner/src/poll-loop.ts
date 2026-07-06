@@ -1,4 +1,4 @@
-import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
+import { findByName, findByRouting, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { getInboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
@@ -543,7 +543,8 @@ export async function processQuery(
             const proseAddressesReason =
               reasonKeywords.length === 0 ||
               reasonKeywords.some((w) => driven.cleanedText.toLowerCase().includes(w));
-            if (!draft && notQuotableReason && !proseAddressesReason && !silentNudged) {
+            const nothingMissing = /already|no new|nothing new|no request/i.test(notQuotableReason ?? '');
+            if (!draft && notQuotableReason && !nothingMissing && !proseAddressesReason && !silentNudged) {
               silentNudged = true;
               log(`Reply misses the quoting gap — pushing missing-fact nudge (${notQuotableReason})`);
               query.push(
@@ -755,11 +756,19 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
     const body = match[2].trim();
     lastIndex = MESSAGE_RE.lastIndex;
 
-    const dest = findByName(toName);
+    let dest = findByName(toName);
     if (!dest) {
-      log(`Unknown destination in <message to="${toName}">, dropping block`);
-      scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
-      continue;
+      // The model typo'd or hallucinated a destination name. The reply is
+      // still for whoever wrote to us — remap to the origin so customers
+      // never lose a reply (and the dedup keys on the REAL destination).
+      dest = findByRouting(routing.channelType, routing.platformId);
+      if (dest) {
+        log(`Unknown destination "${toName}" — remapped to origin ${dest.name}`);
+      } else {
+        log(`Unknown destination in <message to="${toName}">, dropping block`);
+        scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
+        continue;
+      }
     }
     if (sendToDestination(dest, body, routing)) sent++;
   }

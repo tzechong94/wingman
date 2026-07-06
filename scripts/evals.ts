@@ -358,6 +358,25 @@ const scenarios: Scenario[] = [
       ];
     },
   },
+  {
+    id: 14,
+    title: 'Warranty question → grounded answer, no interrogation, no repeats',
+    async run() {
+      const ctx = await newConversation();
+      await say(ctx, 'Chemical wash for 1 wall-mounted unit please.');
+      const t2 = await say(ctx, 'any warranty?');
+      const replies = outs(t2).map((e) => String(e.payload.text ?? ''));
+      return [
+        {
+          name: 'mentions the actual guarantee (30-day / 1-year)',
+          pass: /30.day|1.year|guarantee|warrant/i.test(replies.join(' ')),
+          note: replies.join(' | ').slice(0, 90),
+        },
+        { name: 'no scoping interrogation', pass: !/how many.*units|wall-mounted or ceiling/i.test(replies.join(' ')) },
+        { name: 'no repeated messages', pass: new Set(replies).size === replies.length && replies.length <= 2 },
+      ];
+    },
+  },
 ];
 
 /* ── runner ── */

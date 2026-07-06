@@ -12,6 +12,7 @@ import fs from 'fs';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { replaceDestinations, type DestinationRow } from '../../db/session-db.js';
+import { getSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import { inboundDbPath, openInboundDb } from '../../session-manager.js';
 import { getDestinations } from './db/agent-destinations.js';
@@ -23,10 +24,18 @@ export function writeDestinations(agentGroupId: string, sessionId: string): void
   const rows = getDestinations(agentGroupId);
   const resolved: DestinationRow[] = [];
 
+  // Web visitors accumulate one destination row each; projecting ALL of
+  // them into every session bloats the prompt with hundreds of stale
+  // web-visitor-* names (and the model starts addressing the wrong ones).
+  // A session only ever writes to its own visitor — keep that one plus all
+  // non-web destinations.
+  const sessionMgId = getSession(sessionId)?.messaging_group_id ?? null;
+
   for (const row of rows) {
     if (row.target_type === 'channel') {
       const mg = getMessagingGroup(row.target_id);
       if (!mg) continue;
+      if (mg.channel_type === 'web' && mg.id !== sessionMgId) continue;
       resolved.push({
         name: row.local_name,
         display_name: mg.name ?? row.local_name,

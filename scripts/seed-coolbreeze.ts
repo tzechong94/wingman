@@ -84,6 +84,9 @@ every quote line item must cite the ref it's grounded in.
 | RC-10 | Dismantle & disposal (per unit)                | 60.00       |
 
 Bundles: 3 or more wall-mounted units serviced together ALWAYS use RC-01B (35.00/unit).
+Warranty: installations carry a 1-year workmanship warranty (parts per manufacturer).
+Chemical wash/overhaul and repairs carry a 30-day service guarantee — if the problem
+returns within 30 days, the revisit is free. Warranty visits are always free of charge.
 NOT on the rate card (always check with the boss): ducting work, VRV/VRF systems,
 commercial cold rooms, anything structural.`;
 
