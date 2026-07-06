@@ -48,6 +48,9 @@ grep -q '^ENGRAM_ENCRYPTION_KEY=.' .env || printf "ENGRAM_ENCRYPTION_KEY=%s\n" "
 log "2/8 Wingman host dependencies + build"
 pnpm install --frozen-lockfile
 pnpm run build
+# fresh clones lack the upstream upgrade marker; without it the host refuses
+# to start ("upgrade tripwire")
+pnpm exec tsx scripts/upgrade-state.ts set
 ( cd container/agent-runner && bun install )
 
 log "3/8 Agent container image"
