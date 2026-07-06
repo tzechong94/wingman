@@ -12,6 +12,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."   # repo root
 
+# Non-interactive shells miss the bun/pnpm user paths.
+export PATH="$HOME/.bun/bin:$HOME/.local/share/pnpm:$PATH"
+
 DOMAIN=""
 SKIP_EVALS=0
 while [ $# -gt 0 ]; do
