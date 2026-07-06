@@ -33,6 +33,8 @@ log "1/8 Engram stack (Postgres+pgvector, Redis, MinIO)"
   [ -f .env ] || cp .env.example .env 2>/dev/null || touch .env
   docker compose up -d
   pnpm install --frozen-lockfile
+  # workspace build order matters: memory imports types from shared/dist
+  pnpm --filter @engram/shared build
   pnpm --filter @engram/memory build
 )
 # encryption key shared via wingman/.env (bootstrap may not have set engram's)
