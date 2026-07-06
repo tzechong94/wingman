@@ -39,6 +39,7 @@ fi
 sudo corepack enable && corepack prepare pnpm@latest --activate || sudo npm i -g pnpm
 
 log "Installing Bun (agent-runner runtime)"
+sudo apt-get install -y unzip >/dev/null 2>&1 || true   # bun installer needs unzip
 command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash
 
 log "Installing Caddy (TLS + same-origin fronting)"
