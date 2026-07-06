@@ -39,6 +39,8 @@ log "1/8 Engram stack (Postgres+pgvector, Redis, MinIO)"
   # workspace build order matters: memory imports types from shared/dist
   pnpm --filter @engram/shared build
   pnpm --filter @engram/memory build
+  # fresh Postgres has no schema — create it before anything writes
+  pnpm --filter @engram/memory migrate
 )
 # encryption key shared via wingman/.env (bootstrap may not have set engram's)
 grep -q '^ENGRAM_ENCRYPTION_KEY=.' .env || printf "ENGRAM_ENCRYPTION_KEY=%s\n" "$(openssl rand -hex 32)" >> .env
