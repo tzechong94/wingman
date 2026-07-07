@@ -18,7 +18,7 @@ import {
   type ApprovalHandlerContext,
 } from '../approvals/primitive.js';
 import { recordConvEvent } from './actions.js';
-import { rememberRejection } from './owner-instructions.js';
+import { instructionJustApplied, rememberRejection } from './owner-instructions.js';
 import { fmtCents, type QuoteRecord } from './contracts.js';
 
 /** Resolve the customer-facing routing for a session's origin chat. */
@@ -118,12 +118,21 @@ registerApprovalResolvedHandler(async ({ approval, session, outcome, userId }) =
     } catch (err) {
       log.warn('Could not notify customer of rejection', { quoteId: quote.id, err });
     }
-    notifyAgent(
-      session,
-      `Owner REJECTED quote ${quote.id}${quote.discountPct ? ` (${quote.discountPct}% discount asked)` : ''}. ` +
-        `The customer's original ask is DECLINED — never re-submit it. Unless the owner sends a follow-up ` +
-        `instruction with different terms, re-offer at the house-rules limit.`,
-    );
+    // If the owner attached an instruction to this rejection (dashboard note
+    // or Telegram "reject, max 15%"), the instruction message IS the
+    // coaching. Sending the generic one too creates a SECOND agent turn:
+    // both turns re-quote, the customer gets doubled prose and the owner a
+    // duplicated approval card.
+    if (instructionJustApplied(quote.id)) {
+      log.info('Skipping generic rejection coaching — owner instruction already applied', { quoteId: quote.id });
+    } else {
+      notifyAgent(
+        session,
+        `Owner REJECTED quote ${quote.id}${quote.discountPct ? ` (${quote.discountPct}% discount asked)` : ''}. ` +
+          `The customer's original ask is DECLINED — never re-submit it. Unless the owner sends a follow-up ` +
+          `instruction with different terms, re-offer at the house-rules limit.`,
+      );
+    }
   } else if (approval.action === 'send_nudge') {
     const payload = JSON.parse(approval.payload || '{}') as { quoteId?: string };
     recordConvEvent(session.id, 'followup', 'owner', {

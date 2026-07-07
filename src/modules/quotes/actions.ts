@@ -15,6 +15,7 @@ import type Database from 'better-sqlite3';
 
 import { getConvEvents, insertConvEvent, insertQuote, type ConvActor, type ConvEventType } from '../../db/quotes.js';
 import { log } from '../../log.js';
+import { getPendingApprovalsByAction } from '../../db/sessions.js';
 import type { Session } from '../../types.js';
 import { requestApproval } from '../approvals/primitive.js';
 import { publishConvEvent } from './bus.js';
@@ -138,6 +139,23 @@ export async function handleRequestQuoteApproval(
 ): Promise<void> {
   const quote = stampSession(content.quote as QuoteRecord, session);
   const why = (content.why as string) || 'Outside house rules';
+
+  // Dedup: if a pending approval for this session already asks for the SAME
+  // terms (discount + total), a second one is a duplicate turn's echo —
+  // creating it would double-card the owner.
+  const dup = getPendingApprovalsByAction('send_quote').some((a) => {
+    if (a.status !== 'pending' || a.session_id !== session.id) return false;
+    try {
+      const q = (JSON.parse(a.payload || '{}') as { quote?: QuoteRecord }).quote;
+      return !!q && q.totalCents === quote.totalCents && (q.discountPct ?? 0) === (quote.discountPct ?? 0);
+    } catch {
+      return false;
+    }
+  });
+  if (dup) {
+    log.info('Duplicate quote approval suppressed', { sessionId: session.id, totalCents: quote.totalCents });
+    return;
+  }
 
   insertQuote(quote);
   recordConvEvent(session.id, 'quote', 'agent', quote, quote.createdAt);

@@ -31,8 +31,17 @@ export function rememberRejection(approverUserId: string, sessionId: string, quo
   recentRejections.set(approverUserId, { sessionId, quoteId, rejectedAt: Date.now() });
 }
 
+/** quoteId → ts of the last applied instruction (suppresses generic coaching). */
+const recentInstructions = new Map<string, number>();
+
+export function instructionJustApplied(quoteId: string): boolean {
+  const ts = recentInstructions.get(quoteId);
+  return ts !== undefined && Date.now() - ts < 60_000;
+}
+
 /** Apply a free-text owner instruction to a session (both surfaces land here). */
 export function applyOwnerInstruction(session: Session, text: string, quoteId: string): void {
+  recentInstructions.set(quoteId, Date.now());
   recordConvEvent(session.id, 'approval', 'owner', { state: 'instruction', quoteId, text });
   notifyAgent(
     session,
