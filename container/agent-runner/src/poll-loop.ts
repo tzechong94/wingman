@@ -796,6 +796,8 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
  * on a LATER turn (re-asking a question the customer ignored) must deliver.
  */
 const recentSends = new Set<string>();
+const CROSS_QUERY_WINDOW_MS = 120_000;
+const crossQuerySends = new Map<string, number>();
 
 export function resetDuplicateSends(): void {
   recentSends.clear();
@@ -804,8 +806,18 @@ export function resetDuplicateSends(): void {
 export function isDuplicateSend(destKey: string, body: string): boolean {
   const key = `${destKey}\u0000${body.trim()}`;
   if (recentSends.has(key)) return true;
+  // Exact repeat within 2 minutes across queries: qwen re-emits its last
+  // reply on session resume, and stale turns parrot earlier messages. A
+  // customer never needs the identical text twice in two minutes — the
+  // suppressed-turn nudge regenerates a proper reply if one was needed.
+  const now = Date.now();
+  const prev = crossQuerySends.get(key);
+  if (crossQuerySends.size > 300) {
+    for (const [k, ts] of crossQuerySends) if (now - ts > CROSS_QUERY_WINDOW_MS) crossQuerySends.delete(k);
+  }
+  crossQuerySends.set(key, now);
   recentSends.add(key);
-  return false;
+  return prev !== undefined && now - prev < CROSS_QUERY_WINDOW_MS;
 }
 
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): boolean {

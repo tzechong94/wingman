@@ -348,6 +348,14 @@ export function buildMounts(
     mounts.push({ hostPath: claudeDir, containerPath: '/home/node/.claude', readonly: false });
   }
 
+  // qwen-code keeps its conversation sessions under ~/.qwen INSIDE the
+  // container — with --rm, any container exit wiped mid-conversation
+  // history ("hi" → "Hi there! How can I assist?" amnesia). Persist it in
+  // the session dir so continuations survive restarts.
+  const qwenStateDir = path.join(sessDir, 'qwen-state');
+  fs.mkdirSync(qwenStateDir, { recursive: true });
+  mounts.push({ hostPath: qwenStateDir, containerPath: '/home/node/.qwen', readonly: false });
+
   // Shared agent-runner source — read-only, same code for all groups.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   mounts.push({ hostPath: agentRunnerSrc, containerPath: '/app/src', readonly: true });

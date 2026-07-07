@@ -189,6 +189,12 @@ function formatSingleChat(msg: MessageInRow): string {
 function originAttr(msg: MessageInRow): string {
   const fromDest = findByRouting(msg.channel_type, msg.platform_id);
   if (fromDest) return ` from="${escapeXml(fromDest.name)}"`;
+  // Host/system notices (owner instructions, approval coaching) arrive on
+  // the 'agent' channel with no destination row. Labeling them
+  // "unknown:agent:<id>" taught the model a bogus reply address — it would
+  // emit <message to="unknown:agent:..."> blocks. They are system context;
+  // replies always go to the customer.
+  if (msg.channel_type === 'agent') return ' from="system"';
   if (msg.channel_type || msg.platform_id) {
     return ` from="unknown:${escapeXml(msg.channel_type || '')}:${escapeXml(msg.platform_id || '')}"`;
   }
