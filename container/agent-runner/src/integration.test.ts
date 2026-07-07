@@ -132,24 +132,26 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
-  it('unknown destination is dropped, valid destination is sent', async () => {
+  it('unknown destination remaps to the message origin (reply never lost)', async () => {
     insertMessage('m1', { sender: 'Alice', text: 'hi' }, { platformId: 'chan-1', channelType: 'discord' });
 
     const provider = new MockProvider(
       {},
-      () => '<message to="nonexistent">dropped</message><message to="discord-test">delivered</message>',
+      () => '<message to="nonexistent">remapped</message><message to="discord-test">delivered</message>',
     );
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
 
-    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    await waitFor(() => getUndeliveredMessages().length >= 2, 2000);
     controller.abort();
 
     const out = getUndeliveredMessages();
-    // Only the valid destination should produce output
-    expect(out).toHaveLength(1);
-    expect(JSON.parse(out[0].content).text).toBe('delivered');
-    expect(out[0].platform_id).toBe('chan-1');
+    // The hallucinated destination is remapped to whoever wrote to us —
+    // model typos must not eat customer replies.
+    expect(out).toHaveLength(2);
+    const texts = out.map((m) => JSON.parse(m.content).text).sort();
+    expect(texts).toEqual(['delivered', 'remapped']);
+    for (const m of out) expect(m.platform_id).toBe('chan-1');
 
     await loopPromise.catch(() => {});
   });
