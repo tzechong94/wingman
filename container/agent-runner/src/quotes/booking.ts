@@ -133,12 +133,15 @@ export async function createCalBooking(iso: string, customerName: string | null)
 // One attempt per customer utterance, one booking per offer cycle.
 let lastAttemptText = '';
 
-export async function maybeBookAppointment(routing: {
-  platformId: string | null;
-  channelType: string | null;
-  threadId: string | null;
-  inReplyTo: string | null;
-}): Promise<{ handled: boolean }> {
+export async function maybeBookAppointment(
+  routing: {
+    platformId: string | null;
+    channelType: string | null;
+    threadId: string | null;
+    inReplyTo: string | null;
+  },
+  modelProse = '',
+): Promise<{ handled: boolean }> {
   const NO = { handled: false };
   const say = (text: string): void => {
     writeMessageOut({
@@ -157,7 +160,26 @@ export async function maybeBookAppointment(routing: {
   const latestCustomerText = getRecentTranscript(10)
     .filter((t) => t.role === 'customer')
     .at(-1)?.text;
-  if (!latestCustomerText || !pickIntent(latestCustomerText)) return NO;
+  // The model sometimes CLAIMS a booking that never happened ("I've locked
+  // in Wednesday at 18:00!") — with real slots on offer, replace the lie
+  // with the truth: the actual availability, and let the customer pick.
+  const falseLockClaim = () =>
+    /locked in|i've locked|has been (booked|scheduled)|booked you|scheduled your|your appointment (for|on|is)/i.test(
+      modelProse,
+    );
+  const offerTruth = (): { handled: boolean } => {
+    const menu = slots
+      .slice(0, 6)
+      .map((sl) => sl.label)
+      .join(', ');
+    say(`Here's our live availability: ${menu}. Which of these works best for you?`);
+    log('false booking claim replaced with real availability');
+    return { handled: true };
+  };
+
+  if (!latestCustomerText || !pickIntent(latestCustomerText)) {
+    return falseLockClaim() ? offerTruth() : NO;
+  }
   if (latestCustomerText === lastAttemptText) return NO; // nudge/system turn — customer said nothing new
   lastAttemptText = latestCustomerText;
 
@@ -172,7 +194,7 @@ export async function maybeBookAppointment(routing: {
       say(`That exact time doesn't look open on our calendar, I'm afraid. Here's what we have: ${menu}. Any of these work?`);
       return { handled: true };
     }
-    return NO;
+    return falseLockClaim() ? offerTruth() : NO;
   }
   const slot = slots.find((s) => s.iso === pick.pickedIso)!;
 

@@ -591,7 +591,7 @@ export async function processQuery(
                 driven.acted = true;
               } else {
                 const { maybeBookAppointment } = await import('./quotes/booking.js');
-                const b = await maybeBookAppointment(routing);
+                const b = await maybeBookAppointment(routing, driven.cleanedText);
                 if (b.handled) {
                   bookingHandled = true;
                   // The booking code already messaged the customer with the
