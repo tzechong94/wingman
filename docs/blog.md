@@ -73,6 +73,14 @@ Almost half of the product's behaviors exist because adversarial testing broke t
 
 The suite (currently 14 scenarios) runs in a few minutes and is the regression gate before any deploy — [`scripts/evals.ts`](https://github.com/tzechong94/wingman/blob/main/scripts/evals.ts). If you build an agent product and don't have this, you don't know what you shipped.
 
+## Deploying to Alibaba Cloud: the last boss
+
+Everything above worked flawlessly on my Mac. Deployment day taught me that "works in Docker on macOS" and "works in Docker on Linux" are different sentences. In one evening on an ECS instance (Ubuntu 22.04, 4 vCPU): `host.docker.internal` doesn't resolve on Linux Docker Engine — the memory database silently vanished until I mapped it to the host gateway. Linux bind mounts enforce real file ownership — every agent container died at birth with *"attempt to write a readonly database"* because the image runs as uid 1000 while root owned the session files (Docker Desktop's ownership shim had hidden this for three days). The eval suite went 0-for-3 before I found it, and 13/14 after.
+
+The last holdout was the PDF renderer: Debian's amd64 Chromium build SIGTRAPs at startup inside containers — sandbox flags, seccomp profiles, users, config dirs, nothing helped (my Mac had been building the arm64 image, whose Chromium is fine). Rather than descend into kernel archaeology at 1am, I rewrote the renderer with **pdf-lib** — pure JavaScript, no browser, no native code, renders identically on every architecture. It's the trust-boundary lesson in miniature: every dependency you remove from the critical path is a failure mode you never debug again.
+
+Final run of the behavioral suite against the live Alibaba box: **14/14 scenarios, 43/43 checks** — including the PDF.
+
 ## What I learned
 
 **LLM reliability is an architecture problem, not a prompting problem.** Every single "the model sometimes..." bug ended the same way: move the decision into code, shrink the model's job to language. The final shape — conversational model for words, temperature-0 extractors for decisions, deterministic drivers for actions — wasn't the plan on day one. It's what three days of the model teaching me its failure modes converged to.

@@ -86,7 +86,7 @@
   <text x="1020" y="192" font-size="10" fill="#334155" text-anchor="middle">prices from parsed rate card</text>
   <text x="1020" y="210" font-size="10" fill="#334155" text-anchor="middle">rule engine: discount / total /</text>
   <text x="1020" y="224" font-size="10" fill="#334155" text-anchor="middle">off-card → auto-send or escalate</text>
-  <text x="1020" y="244" font-size="10" fill="#334155" text-anchor="middle">quote cards + Chromium PDFs</text>
+  <text x="1020" y="244" font-size="10" fill="#334155" text-anchor="middle">quote cards + PDFs (pdf-lib)</text>
   <text x="1020" y="264" font-size="10" fill="#334155" text-anchor="middle">cal.com: real slots + bookings</text>
   <text x="1020" y="284" font-size="10" fill="#334155" text-anchor="middle">dedup · nudges · audit events</text>
   <text x="1020" y="304" font-size="10" fill="#334155" text-anchor="middle">owner FYIs</text>

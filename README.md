@@ -6,6 +6,7 @@
 
 > Qwen Cloud Global AI Hackathon · Track 4 (Autopilot Agent) · MIT
 > Demo persona: *CoolBreeze Aircon Services*, a Singapore aircon shop.
+> **Live demo (Alibaba Cloud ECS): http://47.84.186.67**
 
 Customers chat like they'd text any business ("my bedroom aircon smells weird"). Wingman scopes the job, prices it from the business's real rate card, sends a formal quote card + PDF, checks the live calendar, and books the visit — on the owner's actual cal.com. Anything consequential (big discounts, off-menu work, large totals) escalates to the owner's phone for one-tap approval, and the owner's *words* are binding: reject with "max 15%" and the agent re-offers at exactly 15%.
 
@@ -13,7 +14,7 @@ Customers chat like they'd text any business ("my bedroom aircon smells weird").
 
 ## Try it in 90 seconds
 
-Open the dashboard → **Customer** tab → **New chat**:
+Open **http://47.84.186.67** → **Customer** tab → **New chat**:
 
 1. `Chemical wash for 2 wall-mounted units please` → formal quote card + PDF, priced from the rate card (SGD 160), auto-sent because it's within house rules.
 2. `any discount possible?` → re-quoted at the 10% house gesture — no boss needed.
@@ -73,15 +74,15 @@ Deployed on an **Alibaba Cloud ECS** instance: `deploy/alibaba/bootstrap.sh` (on
 
 ## External tools
 
-**cal.com** (live availability + real booking creation) · **Engram** memory over MCP (episodes → sleep-cycle consolidation → semantic notes + entity graph, visible in the Memory tab) · **Telegram Bot API** (approvals, FYIs, owner commands) · **Chromium** (quote PDFs) · **qwen-vl** vision · follow-up scheduler (24h nudges, owner-approved).
+**cal.com** (live availability + real booking creation) · **Engram** memory over MCP (episodes → sleep-cycle consolidation → semantic notes + entity graph, visible in the Memory tab) · **Telegram Bot API** (approvals, FYIs, owner commands) · **pdf-lib** (quote PDFs — pure JS; the image's Chromium turned out to SIGTRAP on amd64, a story the blog tells) · **qwen-vl** vision · follow-up scheduler (24h nudges, owner-approved).
 
 ## Behavioral eval suite
 
-`pnpm exec tsx scripts/evals.ts` — 13 live scenarios / 40 assertions against a running stack; the regression gate for every judged behavior:
+`pnpm exec tsx scripts/evals.ts` — 14 live scenarios / 43 assertions against a running stack; the regression gate for every judged behavior:
 
-ambiguity scoping · correct on-card pricing + PDF · Engram recall · vague-discount gesture · escalate→approve→host-delivery · reject-with-instruction → owner's exact terms · off-card escalation · over-limit escalation · duplicate suppression · booking collects logistics, invents nothing · prompt-injection defense · mid-conversation quantity change re-quotes at bundle rate · graceful close.
+ambiguity scoping · correct on-card pricing + PDF · Engram recall · vague-discount gesture · escalate→approve→host-delivery · reject-with-instruction → owner's exact terms · off-card escalation · over-limit escalation · duplicate suppression · booking collects logistics, invents nothing · prompt-injection defense · mid-conversation quantity change re-quotes at bundle rate · graceful close · grounded warranty answers.
 
-Latest full run: **13/13 scenarios, 40/40 checks**.
+Latest full run: **14/14 scenarios, 43/43 checks — against the live Alibaba Cloud deployment**.
 
 ## Architecture
 
@@ -89,7 +90,7 @@ Latest full run: **13/13 scenarios, 40/40 checks**.
 
 ### In one paragraph
 
-Wingman is a fork of [NanoClaw](https://nanoclaw.dev) (MIT — see `NANOCLAW.md`): a Node host orchestrates per-session Bun agent containers, all IO through two SQLite files per session (host writes `inbound.db`, container writes `outbound.db` — no IPC). Wingman adds: the web channel + SSE cockpit (`src/channels/web/`), the quote pipeline (`container/agent-runner/src/quotes/` + `src/modules/quotes/`), the approvals/owner-instruction/owner-command layer, cal.com scheduling, and the Engram memory mount. The dashboard is Next.js + Tailwind (`dashboard/`, port 3101) talking only to the host's HTTP surface.
+Wingman is a fork of [NanoClaw](https://nanoclaw.dev) (MIT — see `NANOCLAW.md`): a Node host orchestrates per-session Bun agent containers, all IO through two SQLite files per session (host writes `inbound.db`, container writes `outbound.db` — no IPC). Wingman adds: the web channel + SSE cockpit (`src/channels/web/`), the quote pipeline (`container/agent-runner/src/quotes/` + `src/modules/quotes/`), the approvals/owner-instruction/owner-command layer, cal.com scheduling, the pdf-lib quote renderer, and the Engram memory mount. The dashboard is Next.js + Tailwind (`dashboard/`, port 3101) talking only to the host's HTTP surface.
 
 ```
 customer (web/Telegram) ──▶ host router ──▶ inbound.db ──▶ agent container (Bun)
