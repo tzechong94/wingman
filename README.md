@@ -2,6 +2,8 @@
 
 ### demo link: http://47.84.186.67
 
+### demo vid: https://youtu.be/2dgM6xJyrHk
+
 **An AI storefront employee for small service businesses — quotes customers, books real appointments, remembers everyone, and calls the boss only when it matters.**
 
 > Qwen Cloud Global AI Hackathon · Track 4 (Autopilot Agent) · MIT
